@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tessaridb-client"
+version = "0.0.1"
+description = "A client for TessariDB, written from the protocol specification"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["tessaridb", "database", "client"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Database :: Front-Ends",
+]
+
+# No runtime dependencies, and that is deliberate: this package handles
+# credentials, and every dependency would be supply-chain surface inside it.
+dependencies = []
+
+[project.urls]
+Homepage = "https://tessaridb.com"
+Source = "https://github.com/tessaridb/tessaridb-sdk-python"
+
+[tool.setuptools.packages.find]
+where = ["src"]
