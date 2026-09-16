@@ -8,7 +8,44 @@ from another agree about a mistake as readily as about the protocol.
 from ._bytes import ProtocolError
 from ._decode import decode
 from ._encode import encode
+from .connection import Change, Connection, Elsewhere, Reply, Subscription, connect
+from .errors import (
+    IoError,
+    Malformed,
+    NoWritablePeer,
+    NotThisProtocol,
+    Refused,
+    TessariError,
+    TooLarge,
+    Truncated,
+    UnknownFrame,
+    WrongVersion,
+)
+from .outcome import *  # noqa: F401,F403 — the outcome model is the public surface
+from .outcome import __all__ as _outcome_names
 from .value import *  # noqa: F401,F403 — the value model is the public surface
 from .value import __all__ as _value_names
 
-__all__ = ["encode", "decode", "ProtocolError", *_value_names]
+__all__ = [
+    "encode",
+    "decode",
+    "connect",
+    "Connection",
+    "Subscription",
+    "Reply",
+    "Elsewhere",
+    "Change",
+    "ProtocolError",
+    "TessariError",
+    "IoError",
+    "NotThisProtocol",
+    "WrongVersion",
+    "UnknownFrame",
+    "TooLarge",
+    "Truncated",
+    "Malformed",
+    "NoWritablePeer",
+    "Refused",
+    *_outcome_names,
+    *_value_names,
+]

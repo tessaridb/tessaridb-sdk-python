@@ -23,16 +23,22 @@ from __future__ import annotations
 
 import struct
 
+from .errors import TessariError
+
 INT64_MIN = -(2**63)
 INT64_MAX = 2**63 - 1
 INT128_MIN = -(2**127)
 INT128_MAX = 2**127 - 1
 UINT32_MAX = 2**32 - 1
+UINT64_MAX = 2**64 - 1
 NANOS_PER_SECOND = 1_000_000_000
 
 
-class ProtocolError(Exception):
-    """The bytes did not say what this client can read, or a value cannot be written."""
+class ProtocolError(TessariError):
+    """The bytes did not say what this client can read, or a value cannot be written.
+
+    This is §3.11's ``Encoding`` class: report it, do not retry.
+    """
 
 
 def _check(value: int, low: int, high: int, what: str) -> int:
@@ -58,8 +64,18 @@ class Writer:
     def u32(self, value: int) -> None:
         self._out += _check(value, 0, UINT32_MAX, "a u32").to_bytes(4, "big")
 
+    def u64(self, value: int) -> None:
+        """§2.1, the FRAME layer: plain big-endian, and never inverted.
+
+        It sits beside ``i64`` deliberately. The two layers share this module and
+        differ in exactly one place, and conflating them does not fail to parse —
+        it returns wrong values.
+        """
+        self._out += _check(value, 0, UINT64_MAX, "a u64").to_bytes(8, "big")
+
     def i64(self, value: int) -> None:
-        """Two's-complement big-endian, then the first byte XORed with 0x80."""
+        """§2.2, the VALUE layer: two's-complement big-endian, then the first
+        byte XORed with 0x80."""
         raw = bytearray(_check(value, INT64_MIN, INT64_MAX, "an i64").to_bytes(8, "big", signed=True))
         raw[0] ^= 0x80
         self._out += raw
@@ -132,6 +148,10 @@ class Reader:
 
     def u32(self, what: str) -> int:
         return int.from_bytes(self._take(4, what), "big")
+
+    def u64(self, what: str) -> int:
+        """§2.1, plain — see ``Writer.u64``."""
+        return int.from_bytes(self._take(8, what), "big")
 
     def i64(self, what: str) -> int:
         raw = bytearray(self._take(8, what))
