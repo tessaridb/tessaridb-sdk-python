@@ -21,6 +21,8 @@ from .errors import (
     UnknownFrame,
     WrongVersion,
 )
+from .query import BuilderError, Filter, Operator, Rendered, compare
+from .statement import Create, Delete, Select, Update, create, delete, select, update
 from .outcome import *  # noqa: F401,F403 — the outcome model is the public surface
 from .outcome import __all__ as _outcome_names
 from .value import *  # noqa: F401,F403 — the value model is the public surface
@@ -46,6 +48,19 @@ __all__ = [
     "Malformed",
     "NoWritablePeer",
     "Refused",
+    "BuilderError",
+    "Operator",
+    "Filter",
+    "compare",
+    "Rendered",
+    "select",
+    "create",
+    "update",
+    "delete",
+    "Select",
+    "Create",
+    "Update",
+    "Delete",
     *_outcome_names,
     *_value_names,
 ]

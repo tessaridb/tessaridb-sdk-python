@@ -6,9 +6,9 @@ nothing else.
 
 > **Status: early.** The value codec and the wire connection are in — the
 > greeting, statements with bound parameters, answers, refusals and change
-> subscriptions — each proven against the shared conformance corpus and
-> exercised against a running node. The query builder and the HTTP surface are
-> not written yet.
+> subscriptions — and the query builder, whose every rendering is executed by a
+> running node. Each is proven against the shared conformance corpora. The HTTP
+> surface is not written yet.
 
 ```
 pip install tessaridb-client
@@ -27,7 +27,7 @@ The distribution is `tessaridb-client`; the import is `tessaridb`.
 | value codec — all seventeen types, both directions | **done**, 54/54 corpus vectors             |
 | wire connection, greeting, statements, answers     | **done**, exercised against a running node |
 | change subscription                                | **done**, exercised against a running node |
-| query builder                                      | not yet                                    |
+| query builder                                      | **done**, 30/30 corpus, 21 executed by a node |
 | HTTP surface — objects, files, backup, health      | not yet                                    |
 
 ```python
@@ -74,6 +74,52 @@ and a client that handles failures correctly — logs them, retries a bounded
 number of times, gives up — handles an instruction encoded as a failure
 incorrectly every time. So `reply.redirect` carries it, and `reply.outcomes` is
 empty when it does.
+
+## Writing a statement
+
+The builder covers `SELECT`, `CREATE`, `UPDATE` and `DELETE` over one collection.
+Anything else you write as a script and send as one, which is always available.
+
+```python
+query = (
+    tessaridb.select("memories")
+    .field("body")
+    .where(tessaridb.compare("session", "=", tessaridb.Text("abc")))
+    .order_by("created", descending=True)
+    .limit(50)
+    .render()
+)
+# SELECT body FROM memories WHERE session = $p0 ORDER BY created DESC LIMIT 50;
+reply = conn.execute(query.script, query.parameters)
+```
+
+Filters combine with `&` and `|`, and both are **fully parenthesised** in the
+rendered text. The parentheses are not an aid to reading: a builder does not
+depend on the node's parser and therefore does not get to assume how `AND` and
+`OR` associate, so writing them all makes the tree you built the tree that runs.
+
+**A name is not a value.** A table or field name is grammar, so a parameter
+cannot supply one and it is written into the text directly. That is safe only
+because each is checked first, against a deliberately narrow production
+(`[A-Za-z_][A-Za-z0-9_]*`), and a string that is not a name is **refused rather
+than quoted into acceptance** — quoting would turn your mistake into a statement
+that runs and means something else.
+
+```python
+tessaridb.select("memories; DROP COLLECTION memories; --")
+# BuilderError: reason='not-a-name', what='a table'
+```
+
+The refusal is raised where the mistake was made rather than saved for `render`,
+because the traceback then names the line. There are exactly two reasons —
+`not-a-name` and `incomplete` — and the builder never invents a third; an
+operator that is not one of the six is a plain `ValueError`, which is a different
+kind of mistake.
+
+**Object and `SET` fields render in ascending order of their names**, not in the
+order you set them. Two builders given the same fields in different orders have
+to produce the same text and the same parameter numbering, or the same query
+written in two clients would be two statements.
 
 ## Watching changes
 
@@ -171,6 +217,14 @@ Those tests are opt-in and skip loudly when the variables are unset; a suite tha
 needs a server cannot be the suite that runs on a clean checkout. The second node
 is a store with a user declared, because a session is the only thing that makes
 credentials mean anything.
+
+The query corpus is the same idea applied to text: the rendering must be
+byte-identical and the parameter numbering must match, so that the same query
+built in any client language is the same statement. Cases the contract says a
+builder must refuse are asserted as refusals, with the stated reason, and are
+never rendered. Neither the corpus nor the contract reaches the node's **parser**
+— no client may link it — so every rendered case is additionally executed by a
+node with its parameters bound, which is the only check that does.
 
 Where a node cannot be asked — a peer that is not a node, a frame above the
 16 MiB ceiling, an outcome tag from a future build, the three fields at the end
