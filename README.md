@@ -6,9 +6,10 @@ nothing else.
 
 > **Status: early.** The value codec and the wire connection are in — the
 > greeting, statements with bound parameters, answers, refusals and change
-> subscriptions — and the query builder, whose every rendering is executed by a
-> running node. Each is proven against the shared conformance corpora. The HTTP
-> surface is not written yet.
+> subscriptions — the query builder, whose every rendering is executed by a
+> running node, and the HTTP surface for objects, files, backup and health. Each
+> is proven against the shared conformance corpora and exercised against a
+> running node.
 
 ```
 pip install tessaridb-client
@@ -28,7 +29,10 @@ The distribution is `tessaridb-client`; the import is `tessaridb`.
 | wire connection, greeting, statements, answers     | **done**, exercised against a running node |
 | change subscription                                | **done**, exercised against a running node |
 | query builder                                      | **done**, 30/30 corpus, 21 executed by a node |
-| HTTP surface — objects, files, backup, health      | not yet                                    |
+| HTTP surface — objects, files, backup, health      | **done**, exercised against a running node    |
+| JSON values and outcomes — §5.6, §5.7              | **done**, 59/59 values, 20/20 outcomes        |
+| session token — §5.8                               | **done**, open once, `Bearer` thereafter      |
+| `/watch`, `/metrics`, `POST /password`             | not yet                                       |
 
 ```python
 import tessaridb
@@ -150,6 +154,100 @@ Credentials travel as given. Run this on a protected network, or behind somethin
 that terminates TLS. It is a property of the protocol rather than an omission
 here, and it is said out loud rather than left to be discovered.
 
+## Objects, files and health
+
+Everything the wire protocol does not serve is here, and it is a different client
+because it is a different surface rather than an alternative to the first one.
+
+```python
+node = tessaridb.HTTPClient("127.0.0.1:8000", user="app", password=os.environ["TESSARIDB_PASSWORD"])
+
+node.put("acme", "app", "uploads", "reports/100% done.pdf", content)
+back = node.get("acme", "app", "uploads", "reports/100% done.pdf")
+listing = node.listing("acme", "app", "uploads")
+condition = node.health()
+```
+
+**The password is spent once.** A node verifies Basic with Argon2id at the OWASP
+floor, and HTTP has no connection to hang a session on, so that cost is paid on
+_every_ request that carries one. This client opens a session on its first
+authenticated call and presents the token after — and when a token stops working,
+which it does four different ways that all answer `401`, it signs in again and
+retries once, without the caller seeing it. A client that skipped this would be
+correct, would pass every test, and would be slower than the protocol intends by
+more than an order of magnitude.
+
+**`node.script()` takes no parameters, and that is deliberate.** A parameter on
+this route is a JSON string carrying _TessariQL source_, not a value —
+`{"x":"3"}` is the number 3 and `{"x":"hello"}` is a `400`. Passing a caller's
+string through would be a type-confusion hazard that no test written against it
+would show, so this client does not build the bridge: a statement with a value in
+it goes over the wire, where a parameter is an encoded value and none of this
+arises.
+
+**A `404` is an answer.** A file that is not there reads as `None` and a file that
+exists and is empty reads as zero bytes — these are different facts and the
+server draws the line, so this client does not erase it. A listing that comes
+back `None` means the name is not a bucket; an empty tuple means the bucket is
+there and holds nothing.
+
+`HEAD` is deliberately not offered rather than pending. The node reads the whole
+object and discards the body, so it costs the server exactly what a `GET` costs;
+presenting it as a cheap `exists()` would be an invitation to call it in a loop.
+
+## A value read over HTTP needs its kind
+
+JSON has six types and the store has seventeen, so §5.7 is a decision rather than
+a translation: for most of the table the type is **not recoverable from the JSON
+alone**. `"12.34"` is a decimal or a string, `"1h30m"` is a duration or a string,
+and `users:7` is the integer 7 or the text `'7'`.
+
+So the reader is told, and a caller reads the kind from the field's declaration
+in the catalog:
+
+```python
+outcomes = node.script("RETURN 1;", tessaridb.Reading(tessaridb.IntegerKind()))
+outcomes[-1].value      # Integer(value=1)
+```
+
+A reader that guessed instead would be right most of the time, which is worse
+than being wrong all of it. If you need types without carrying a catalog, use the
+wire protocol, where every value carries its tag.
+
+One spelling stays lossy even with the kind supplied, and this client says so
+rather than papering over it: a float `-0.0` is written `0`, because the value is
+normalised before it is written. No reader can tell it from `+0.0`.
+
+**A table and a record identity are strings here and are not parsed back.**
+`users:7` is the integer 7 and the text `'7'` written identically, and the
+conformance corpus carries one `keys` outcome holding `"1"` beside `"ada"` — an
+integer identity and a text one in a single array, which no declared kind could
+cover. They are identifiers to display, log and pass back.
+
+## Three things this node does that the specification does not
+
+Found while writing this client against `protocol-v1.md` alone, measured against
+a `0.0.5-alpha` node, and asserted in the live tests so they are loud rather than
+silent — each of those tests fails the day the node is fixed, which is the right
+direction for it to fail in.
+
+`GET /files/{ns}/{db}/{bucket}` answers a whole records outcome wrapped in
+`files` — the shape §5.1 says is gone — and a name that is a collection rather
+than a bucket answers `200` with that collection's records instead of the
+specified `404`. This client refuses the wrapped shape rather than reading it,
+because such an element still carries a `path` key holding the access path, so a
+reader that trusts it returns a file called `scan` and reports success.
+
+A repeated Basic sign-in earns `429`, a status §5.2 does not enumerate, and the
+node then refuses that user's **correct** password. That interacts directly with
+§5.8's prescribed recovery, so this client retries a `401` once and never a
+`429`, and it remembers a store that has no session to open rather than asking
+per request.
+
+`GET /backup` is chunked, which §5.3 forbids on every route and names this one
+specifically. This client reads it anyway: §5.3's refusal is for a framing a
+client does not recognise, and chunked is recognised.
+
 ## Values
 
 The store's model has seventeen types, and two of its distinctions are easy to
@@ -225,6 +323,12 @@ builder must refuse are asserted as refusals, with the stated reason, and are
 never rendered. Neither the corpus nor the contract reaches the node's **parser**
 — no client may link it — so every rendered case is additionally executed by a
 node with its parameters bound, which is the only check that does.
+
+The JSON corpus is decode-only, and it says why: a client never encodes a value
+on that surface, since a `/script` parameter carries TessariQL source rather than
+JSON. So it is weaker than the value corpus by construction — there is no writer
+for a wrong reader to agree with — and what it does catch is every place the JSON
+is lossy and the declared kind is what restores the value.
 
 Where a node cannot be asked — a peer that is not a node, a frame above the
 16 MiB ceiling, an outcome tag from a future build, the three fields at the end

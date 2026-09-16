@@ -21,7 +21,13 @@ from .errors import (
     UnknownFrame,
     WrongVersion,
 )
+from .health import Health, Healthy, Leaving, Unwell
+from .http import FileEntry, HTTPClient, HTTPError
+from .kind import *  # noqa: F401,F403 — the declared kinds are the public surface
+from .kind import __all__ as _kind_names
 from .query import BuilderError, Filter, Operator, Rendered, compare
+from .script import *  # noqa: F401,F403 — the script outcome model is the public surface
+from .script import __all__ as _script_names
 from .statement import Create, Delete, Select, Update, create, delete, select, update
 from .outcome import *  # noqa: F401,F403 — the outcome model is the public surface
 from .outcome import __all__ as _outcome_names
@@ -61,6 +67,15 @@ __all__ = [
     "Create",
     "Update",
     "Delete",
+    "HTTPClient",
+    "HTTPError",
+    "FileEntry",
+    "Health",
+    "Healthy",
+    "Unwell",
+    "Leaving",
     *_outcome_names,
+    *_kind_names,
+    *_script_names,
     *_value_names,
 ]
