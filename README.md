@@ -28,7 +28,7 @@ The distribution is `tessaridb-client`; the import is `tessaridb`.
 | value codec — all seventeen types, both directions | **done**, 54/54 corpus vectors             |
 | wire connection, greeting, statements, answers     | **done**, exercised against a running node |
 | change subscription                                | **done**, exercised against a running node |
-| query builder                                      | **done**, 30/30 corpus, 21 executed by a node |
+| query builder                                      | **done**, 38/38 corpus, 26 executed by a node |
 | HTTP surface — objects, files, backup, health      | **done**, exercised against a running node    |
 | JSON values and outcomes — §5.6, §5.7              | **done**, 59/59 values, 20/20 outcomes        |
 | session token — §5.8                               | **done**, open once, `Bearer` thereafter      |
@@ -97,6 +97,24 @@ query = (
 reply = conn.execute(query.script, query.parameters)
 ```
 
+On a cluster, two more clauses say **which node may answer** rather than what the
+answer holds:
+
+```python
+query = (
+    tessaridb.select("orders")
+    .staleness("30s")        # no node further behind than this may answer
+    .answered_by("LEADER")   # and it must be the node that decides writes
+    .render()
+)
+# SELECT * FROM orders STALENESS 30s ANSWERED BY LEADER;
+```
+
+They are separate controls rather than one: a follower at zero lag is *level*,
+not authoritative. A bound tighter than the cluster can know about itself is
+refused **by the node**, and the refusal names the floor — this client checks the
+shape of a span and never its value, because the floor belongs to the cluster.
+
 Filters combine with `&` and `|`, and both are **fully parenthesised** in the
 rendered text. The parentheses are not an aid to reading: a builder does not
 depend on the node's parser and therefore does not get to assume how `AND` and
@@ -140,6 +158,13 @@ for change in changes:
 and no longer answers statements; a client that wants both opens two. This one
 refuses rather than hiding it, because hiding it would promise a multiplexing the
 protocol does not perform.
+
+**A subscription the node declines is refused on the feed**, not at the
+`subscribe` call — the node reads the frame before it can judge it. The commonest
+cause is the one the example above avoids: a connection that has named no
+namespace has no `thing` to watch. It arrives as `Refused` carrying the node's
+own words, because reading it as an unknown frame sends whoever meets it to the
+protocol when the answer is a statement they did not run.
 
 **The node drops a subscriber that stops reading after 30 seconds**, and nothing
 is lost when it does — the log is the buffer. So the loop above simply ends, and
@@ -224,19 +249,29 @@ conformance corpus carries one `keys` outcome holding `"1"` beside `"ada"` — a
 integer identity and a text one in a single array, which no declared kind could
 cover. They are identifiers to display, log and pass back.
 
-## Three things this node does that the specification does not
+## What this node does that the specification does not
 
 Found while writing this client against `protocol-v1.md` alone, measured against
 a `0.0.5-alpha` node, and asserted in the live tests so they are loud rather than
 silent — each of those tests fails the day the node is fixed, which is the right
-direction for it to fail in.
+direction for it to fail in. **Two of the three have since been fixed and their
+tests are flipped**, measured against `0.3.0-beta`.
 
-`GET /files/{ns}/{db}/{bucket}` answers a whole records outcome wrapped in
-`files` — the shape §5.1 says is gone — and a name that is a collection rather
-than a bucket answers `200` with that collection's records instead of the
-specified `404`. This client refuses the wrapped shape rather than reading it,
-because such an element still carries a `path` key holding the access path, so a
-reader that trusts it returns a file called `scan` and reports success.
+**Fixed.** `GET /files/{ns}/{db}/{bucket}` now answers `{"files": […]}`, the
+§5.1 shape, and every name that is not a bucket answers `404`. `0.0.5-alpha`
+answered a whole records outcome wrapped in `files` and `200` for a collection's
+name. This client still refuses the wrapped shape rather than reading it,
+because such an element carries a `path` key holding the access path, so a reader
+that trusts it returns a file called `scan` and reports success — an old node is
+still an old node.
+
+**Not a divergence, and a trap all the same.** A listing's `path` carries a
+leading slash, exactly as §5.1's example shows, and it is **not** the name that
+was written: a file `PUT` as `notes.txt` lists as `/notes.txt`, and one named
+`/notes.txt` lists as `//notes.txt`. Feed a listed path straight back to `get`
+and the request carries a double slash and answers `404`. Strip **one** leading
+slash, never `lstrip("/")` — a file may genuinely be named with one, and
+stripping them all reads a different file and reports success.
 
 A repeated Basic sign-in earns `429`, a status §5.2 does not enumerate, and the
 node then refuses that user's **correct** password. That interacts directly with
@@ -244,9 +279,13 @@ node then refuses that user's **correct** password. That interacts directly with
 `429`, and it remembers a store that has no session to open rather than asking
 per request.
 
-`GET /backup` is chunked, which §5.3 forbids on every route and names this one
-specifically. This client reads it anyway: §5.3's refusal is for a framing a
-client does not recognise, and chunked is recognised.
+`GET /backup` is chunked **once the log is big enough**, which §5.3 forbids on
+every route and names this one specifically. The condition is the point:
+measured against `0.3.0-beta`, a ~23 kB backup declared `Content-Length` and a
+~38 kB one chunked, so a test on a fresh store reports the divergence fixed and
+production meets it anyway. The live test now writes past the threshold first.
+This client reads either framing: §5.3's refusal is for a framing a client does
+not recognise, and chunked is recognised.
 
 ## Values
 

@@ -65,6 +65,10 @@ def build(node: dict):
             query.start(it["start"])
         if "limit" in it:
             query.limit(it["limit"])
+        if "staleness" in it:
+            query.staleness(it["staleness"])
+        if "answered_by" in it:
+            query.answered_by(it["answered_by"])
         return query
     if "create_record" in node:
         it = node["create_record"]
@@ -129,9 +133,12 @@ class QueryCorpus(unittest.TestCase):
                     self.assertEqual(caught.exception.what, refused["what"])
                     self.assertEqual(caught.exception.name, refused["name"])
 
-    def test_the_corpus_carries_both_refusal_reasons_and_no_third(self) -> None:
+    def test_the_corpus_carries_every_refusal_reason_and_no_other(self) -> None:
         reasons = {c["refused"]["reason"] for c in self.corpus["cases"] if "refused" in c}
-        self.assertEqual(reasons, {"not-a-name", "incomplete"})
+        self.assertEqual(
+            reasons,
+            {"not-a-name", "incomplete", "not-a-span", "not-an-answerer"},
+        )
 
 
 class AgainstTheParser(unittest.TestCase):
@@ -164,7 +171,11 @@ class AgainstTheParser(unittest.TestCase):
                     self.conn.execute("CREATE memories:'note-1' = { body: 'seed' };")
                 self.conn.execute(rendered.script, rendered.parameters)
                 ran += 1
-        self.assertEqual(ran, len(corpus["cases"]) - 9, "every rendered case reached the node")
+        # Derived rather than written down: the corpus grew from 30 cases to 38
+        # at contract 1.1, and a hardcoded count turns that growth into a failure
+        # that reads like a node problem.
+        rendered_cases = sum(1 for case in corpus["cases"] if "refused" not in case)
+        self.assertEqual(ran, rendered_cases, "every rendered case reached the node")
 
 
 if __name__ == "__main__":

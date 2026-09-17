@@ -238,7 +238,20 @@ class Subscription:
                 self._conn.close()
                 return
             kind, body = frame
+            if kind == frames.REFUSAL:
+                # The refusal for a subscription the node declined arrives HERE
+                # rather than at `subscribe`, because the node reads the frame
+                # before it can judge it — a table it cannot watch, or a session
+                # that has named no namespace to look in. Read as an unknown
+                # frame it would send whoever met it to the protocol, when the
+                # answer is a statement they did not run. Measured against a
+                # running node: a `Subscription` opened before `USE NAMESPACE`
+                # raised `UnknownFrame(3)`.
+                self._conn.close()
+                raise Refused(body.decode("utf-8", "replace"))
             if kind != frames.CHANGE:
+                # A redirect belongs to a read another node can answer. A
+                # subscription is a position in ONE node's log, so this stays.
                 self._conn.close()
                 raise UnknownFrame(kind)
             change = _change(body)

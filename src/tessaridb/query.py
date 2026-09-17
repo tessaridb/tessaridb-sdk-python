@@ -56,6 +56,13 @@ class BuilderError(TessariError):
     def __init__(self, reason: str, what: str = "", name: str = "") -> None:
         if reason == "incomplete":
             super().__init__("a statement with no fields cannot be rendered")
+        elif reason == "not-a-span":
+            super().__init__(
+                f"{name!r} is not a span — write digits and one of "
+                "ns, us, ms, s, m, h, d, w, as in `30s` or `1m30s`"
+            )
+        elif reason == "not-an-answerer":
+            super().__init__(f"{name!r} is not an answerer — write ANY or LEADER")
         else:
             super().__init__(f"{name!r} is not a name, and {what} must be one")
         self.reason = reason
@@ -78,6 +85,55 @@ def check_name(what: str, name: str) -> str:
             continue
         raise BuilderError("not-a-name", what, name)
     return name
+
+
+SPAN_UNITS = ("ns", "us", "ms", "s", "m", "h", "d", "w")
+
+
+def check_span(text: str) -> str:
+    """``span ::= 1*( 1*DIGIT unit )`` with the node's own eight units.
+
+    Checked because a span is written into the statement TEXT rather than bound —
+    a node refuses a parameter in that position — so this is the one clause where
+    a caller's characters reach the script, and the check is what keeps §2's
+    guarantee true for it.
+
+    The VALUE is never judged here. A bound tighter than the cluster's floor is
+    the node's refusal to make, and its message names the floor; a client that
+    guessed it would be wrong on the next cluster and would leave the caller
+    unable to write an acceptable statement.
+    """
+    rest = text
+    seen = False
+    while rest:
+        digits = 0
+        while digits < len(rest) and "0" <= rest[digits] <= "9":
+            digits += 1
+        if digits == 0:
+            raise BuilderError("not-a-span", "a staleness bound", text)
+        rest = rest[digits:]
+        for unit in sorted(SPAN_UNITS, key=len, reverse=True):
+            if rest.startswith(unit):
+                rest = rest[len(unit) :]
+                seen = True
+                break
+        else:
+            raise BuilderError("not-a-span", "a staleness bound", text)
+    if not seen:
+        raise BuilderError("not-a-span", "a staleness bound", text)
+    return text
+
+
+def check_answerer(word: str) -> str:
+    """``ANY`` or ``LEADER``, and no third.
+
+    The direction a guess fails in is the unsafe one: somebody writing ``MASTER``
+    means the leader, and passing an unrecognised word through would have the read
+    answered by whichever copy came first.
+    """
+    if word not in ("ANY", "LEADER"):
+        raise BuilderError("not-an-answerer", "an answerer", word)
+    return word
 
 
 class Operator(Enum):

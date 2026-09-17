@@ -17,7 +17,17 @@ writes do in the codec.
 
 from __future__ import annotations
 
-from .query import Binder, BuilderError, Filter, Rendered, check_name, checked_fields, render_object
+from .query import (
+    Binder,
+    BuilderError,
+    Filter,
+    Rendered,
+    check_answerer,
+    check_name,
+    check_span,
+    checked_fields,
+    render_object,
+)
 from .value import Value
 
 __all__ = ["select", "create", "update", "delete", "Select", "Create", "Update", "Delete"]
@@ -32,7 +42,12 @@ def _count(value: int, what: str) -> int:
 
 
 class Select:
-    """``SELECT <projection> FROM <table> [WHERE] [ORDER BY] [START] [LIMIT];``"""
+    """``SELECT … [WHERE] [ORDER BY] [START] [LIMIT] [STALENESS] [ANSWERED BY];``
+
+    The last two decide **which node may answer** rather than what the answer
+    holds, and they come last in that order because a node's parser accepts no
+    other sequence.
+    """
 
     def __init__(self, table: str) -> None:
         self._table = check_name("a table", table)
@@ -41,6 +56,8 @@ class Select:
         self._order: list[str] = []
         self._start: int | None = None
         self._limit: int | None = None
+        self._staleness: str | None = None
+        self._answered_by: str | None = None
 
     def field(self, name: str) -> Select:
         """A projection keeps **call order** — unlike an object body, which sorts."""
@@ -83,6 +100,27 @@ class Select:
         self._limit = _count(count, "a limit")
         return self
 
+    def staleness(self, span: str) -> Select:
+        """How far behind the node answering this read may be — ``"30s"``, ``"1m30s"``.
+
+        A candidate filter and never a marker: it says which nodes may answer at
+        all, rather than labelling an answer as stale. A read no node can satisfy
+        is refused by the node rather than quietly promoted to the one node that
+        certainly can.
+        """
+        self._staleness = check_span(span)
+        return self
+
+    def answered_by(self, answerer: str) -> Select:
+        """``"ANY"`` or ``"LEADER"`` — where the answer must come from.
+
+        Not a tighter :meth:`staleness`: a follower at zero lag is *level*, not
+        authoritative, so no freshness bound expresses *this must come from where
+        writes are decided*.
+        """
+        self._answered_by = check_answerer(answerer)
+        return self
+
     def render(self) -> Rendered:
         binder = Binder()
         projection = ", ".join(self._items) if self._items else "*"
@@ -95,6 +133,10 @@ class Select:
             script += f" START {self._start}"
         if self._limit is not None:
             script += f" LIMIT {self._limit}"
+        if self._staleness is not None:
+            script += f" STALENESS {self._staleness}"
+        if self._answered_by is not None:
+            script += f" ANSWERED BY {self._answered_by}"
         return Rendered(script + ";", binder.parameters)
 
 
