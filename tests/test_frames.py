@@ -25,10 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from tessaridb import NONE  # noqa: E402
 from tessaridb import _frames as frames  # noqa: E402
 from tessaridb._answer import read_answer  # noqa: E402
-from tessaridb.connection import _change, _elsewhere  # noqa: E402
+from tessaridb.connection import Connection, _change, _elsewhere  # noqa: E402
 from tessaridb.errors import (  # noqa: E402
     Malformed,
     NotThisProtocol,
+    Refused,
     TooLarge,
     Truncated,
     UnknownFrame,
@@ -253,6 +254,21 @@ class AppendedFields(unittest.TestCase):
         self.assertIsInstance(
             read_answer(answer(records(tail=head + b"\x63")))[0].suggestion, NotConsulted
         )
+
+
+class Feeds(unittest.TestCase):
+    def test_a_subscription_the_node_refuses_is_a_refusal_not_an_unknown_frame(self) -> None:
+        # It arrives on the feed rather than at the Subscribe frame, because the
+        # node reads the frame before it can judge it. Found against a running
+        # node: subscribing before `USE NAMESPACE` raised `UnknownFrame(3)`.
+        said = "no collection `thing` — name a namespace first"
+        peer = Peer(b"TESS\x01\x01" + b"\x03" + u32(len(said.encode())) + said.encode())
+        self.addCleanup(peer.close)
+        conn = Connection(peer.ours, None, None)
+        subscription = conn.subscribe(table="thing")
+        with self.assertRaises(Refused) as caught:
+            next(iter(subscription))
+        self.assertEqual(caught.exception.message, said)
 
 
 class Bodies(unittest.TestCase):

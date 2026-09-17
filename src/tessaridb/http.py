@@ -238,7 +238,9 @@ class HTTPClient:
             # §5.3 requires every response on this surface to declare its
             # length and forbids `Transfer-Encoding: chunked` on any route,
             # naming `GET /backup` as the one that must still declare it. This
-            # node chunks exactly that route (Q-PY-009). The framing is read
+            # node chunks exactly that route, and only once the log crosses
+            # its buffer — so a small store looks compliant (Q-PY-009).
+            # The framing is read
             # rather than refused: §5.3's refusal is for a framing a client does
             # not RECOGNISE, and chunked is recognised — the standard library
             # de-chunks it transparently. Refusing a recognised framing would be

@@ -102,48 +102,76 @@ class OpenStore(unittest.TestCase):
         self.assertIsNone(self.node.get("pyhttp", "app", "docs", "nothing-here.txt"))
         self.node.delete("pyhttp", "app", "docs", "empty.txt")
 
-    def test_this_node_answers_the_retired_wrapped_listing_Q_PY_007(self) -> None:
-        """A known divergence, asserted so it is loud rather than silent.
+    def test_a_listing_is_the_shape_5_1_specifies_Q_PY_007_RESOLVED(self) -> None:
+        """Flipped the day the node was fixed, which is the direction the
+        previous version of this test asked to fail in.
 
-        `0.0.5-alpha` answers `GET /files/{ns}/{db}/{bucket}` with a whole §5.6
-        records outcome wrapped in `files` — the shape §5.1 says is gone,
-        carrying the query plan and a storage-level chunk count. Such an element
-        still has a `path` key holding the access path, so a reader that trusts
-        it returns a file called `scan` and reports success.
-
-        This test fails the day the node is fixed, which is the right direction
-        for it to fail in: flip it to the specified shape then. Q-PY-007.
+        `0.0.5-alpha` answered `GET /files/{ns}/{db}/{bucket}` with a whole §5.6
+        records outcome wrapped in `files`, carrying the query plan and a
+        storage-level chunk count; such an element still has a `path` key holding
+        the ACCESS PATH, so a reader that trusted it returned a file called
+        `scan` and reported success. Measured against `0.3.0-beta`: the route
+        answers `{"files": [...]}` with a `path` per file and nothing else.
+        Q-PY-007 resolved.
         """
-        with self.assertRaises(tessaridb.Malformed) as caught:
-            self.node.listing("pyhttp", "app", "docs")
-        self.assertIn("Q-PY-007", str(caught.exception))
+        self.node.put("pyhttp", "app", "docs", "listed.txt", b"here")
+        listing = self.node.listing("pyhttp", "app", "docs")
+        self.assertIsNotNone(listing)
 
-    def test_this_node_does_not_404_a_name_that_is_not_a_bucket_Q_PY_007(self) -> None:
-        """The second half of the same divergence.
+        # The path carries a LEADING SLASH, as §5.1's own example shows — and it
+        # is not the name that was written. Measured: a file PUT as `listed.txt`
+        # lists as `/listed.txt`, and one PUT as `/weird.txt` lists as
+        # `//weird.txt`, so the listing prepends exactly one. Feeding the listed
+        # path straight back to `get` is a 404, because the route then carries a
+        # double slash. Strip ONE, never `lstrip("/")`: a file may genuinely be
+        # named with a leading slash, and stripping them all reads the wrong file
+        # while reporting success.
+        self.assertIn("/listed.txt", [entry.path for entry in listing])
+        name = next(e.path for e in listing if e.path.endswith("listed.txt"))[1:]
+        self.assertEqual(self.node.get("pyhttp", "app", "docs", name), b"here")
+        self.node.delete("pyhttp", "app", "docs", "listed.txt")
+
+    def test_a_name_that_is_not_a_bucket_is_404_Q_PY_007_RESOLVED(self) -> None:
+        """The second half of the same divergence, and also fixed.
 
         §5.1 and §5.2 both say every `/files` request naming a bucket that is not
-        one answers `404`. This node answers `200` for a name declared as a
+        one answers `404`. `0.0.5-alpha` answered `200` for a name declared as a
         COLLECTION — returning that collection's records through the files route
-        — and `400` for a name nothing declared. Neither is `404`, and the first
-        means the listing route resolves the name as a table rather than a
-        bucket.
-        """
-        with self.assertRaises(tessaridb.Malformed):
-            self.node.listing("pyhttp", "app", "thing")
-        with self.assertRaises(HTTPError) as caught:
-            self.node.listing("pyhttp", "app", "nothingdeclared")
-        self.assertEqual(caught.exception.status, 400, "specified as 404")
+        — and `400` for a name nothing declared. `0.3.0-beta` answers `404` to
+        both, which the client reads as `None`: the bucket is not there.
 
-    def test_this_node_chunks_the_backup_Q_PY_009(self) -> None:
-        """A known divergence, asserted so it is loud rather than silent.
+        Which of the two a given route returns is explicitly not specified, so
+        this asserts only that neither is readable as a listing.
+        """
+        self.assertIsNone(self.node.listing("pyhttp", "app", "thing"))
+        self.assertIsNone(self.node.listing("pyhttp", "app", "nothingdeclared"))
+
+    def test_this_node_chunks_a_backup_once_the_log_is_big_enough_Q_PY_009(self) -> None:
+        """A known divergence, asserted so it is loud rather than silent — and
+        the assertion is now SIZE-BOUND, which is the part that was missing.
 
         §5.3 requires every response on this surface to declare its length and
         forbids `Transfer-Encoding: chunked` on **any** route, naming
         `GET /backup` as the one whose body has no small upper bound and which
-        must still declare it. This node chunks exactly that route, and only that
-        route. Q-PY-009.
+        must still declare it.
+
+        Measured against `0.3.0-beta`: a backup of ~23 kB came back with
+        `Content-Length` and one of ~38 kB came back chunked. So the earlier
+        version of this test, which simply asked whether the route chunks, passes
+        on a fresh store and fails on a used one — and a suite that seeds a small
+        fixture would have reported the divergence FIXED. It is not fixed; it is
+        conditional, which is worse, because the small case is the one a test
+        writes and the large case is the one production has. Q-PY-009.
+
+        The framing is READ rather than refused: §5.3's refusal is for a framing
+        a client does not RECOGNISE, and chunked is recognised.
         """
         import http.client
+
+        # Deliberately over the threshold, so this asserts the same thing on a
+        # fresh store and on a used one.
+        self.node.put("pyhttp", "app", "docs", "big.bin", b"\x00" * 128 * 1024)
+        self.addCleanup(self.node.delete, "pyhttp", "app", "docs", "big.bin")
 
         host, _, port = os.environ["TESSARIDB_TEST_HTTP"].rpartition(":")
         connection = http.client.HTTPConnection(host, int(port))
@@ -151,6 +179,7 @@ class OpenStore(unittest.TestCase):
             connection.request("GET", "/backup")
             backup = connection.getresponse()
             self.assertEqual(backup.getheader("Transfer-Encoding"), "chunked", "specified as absent")
+            self.assertIsNone(backup.getheader("Content-Length"), "§5.3 requires one")
             backup.read()
         finally:
             connection.close()
@@ -179,9 +208,17 @@ class OpenStore(unittest.TestCase):
         node = HTTPClient(os.environ["TESSARIDB_TEST_HTTP"], user="nobody", password="nothing")
         with self.assertRaises(HTTPError) as caught:
             node.script("RETURN 1;", Reading(IntegerKind()))
-        self.assertIn(caught.exception.status, (401, 429), "429 is the limiter — Q-PY-008")
+        status = caught.exception.status
+        self.assertIn(status, (401, 429), "429 is the limiter — Q-PY-008")
         self.assertIsNone(node._token, "no token was minted, and none was needed")
-        self.assertTrue(node._sessionless, "asked once, and not again")
+        if status == 401:
+            self.assertTrue(node._sessionless, "asked once, and not again")
+        else:
+            # The limiter answered BEFORE the store could say it has no session
+            # to open, so nothing was learned and remembering would be inventing.
+            # Asserting `_sessionless` unconditionally made this test depend on
+            # how many times the suite had run against the same long-lived node.
+            self.assertFalse(node._sessionless, "the limiter taught this client nothing")
 
         # With no credentials at all, the same open store runs anything.
         outcomes = self.node.script("RETURN 1;", Reading(IntegerKind()))
