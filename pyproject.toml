@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tessaridb-client"
-version = "0.0.1"
+version = "0.1.0"
 description = "A client for TessariDB, written from the protocol specification"
 readme = "README.md"
 requires-python = ">=3.11"
