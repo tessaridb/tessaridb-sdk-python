@@ -97,6 +97,24 @@ query = (
 reply = conn.execute(query.script, query.parameters)
 ```
 
+On a cluster, two more clauses say **which node may answer** rather than what the
+answer holds:
+
+```python
+query = (
+    tessaridb.select("orders")
+    .staleness("30s")        # no node further behind than this may answer
+    .answered_by("LEADER")   # and it must be the node that decides writes
+    .render()
+)
+# SELECT * FROM orders STALENESS 30s ANSWERED BY LEADER;
+```
+
+They are separate controls rather than one: a follower at zero lag is *level*,
+not authoritative. A bound tighter than the cluster can know about itself is
+refused **by the node**, and the refusal names the floor — this client checks the
+shape of a span and never its value, because the floor belongs to the cluster.
+
 Filters combine with `&` and `|`, and both are **fully parenthesised** in the
 rendered text. The parentheses are not an aid to reading: a builder does not
 depend on the node's parser and therefore does not get to assume how `AND` and
