@@ -87,6 +87,10 @@ class Change:
     identity: str
     removed: bool
     value: Value | None
+    #: On a feed over a split table, where to resume after this change — its
+    #: logs count separately, so no one ``sequence`` says where the feed was.
+    #: ``None`` on every other feed.
+    cursor: str | None = None
 
 
 def connect(address: str, user: str | None = None, password: str | None = None) -> Connection:
@@ -133,7 +137,9 @@ class Connection:
         frames.send(self._sock, frames.REQUEST, self._request(script, parameters or {}))
         return self._reply()
 
-    def subscribe(self, from_: int = 0, table: str | None = None) -> Subscription:
+    def subscribe(
+        self, from_: int = 0, table: str | None = None, cursor: str | None = None
+    ) -> Subscription:
         """Consume this connection and deliver changes from ``from_`` **inclusive**.
 
         ``0`` means everything the log still holds. The ``+1`` arithmetic that
@@ -141,6 +147,10 @@ class Connection:
         documented and left to the caller — resuming at a position already
         handled delivers it twice and resuming past one reports being caught up,
         and both are silent.
+
+        ``cursor`` resumes a feed over a split table **after** the change that
+        carried it (:attr:`Change.cursor`, or :attr:`Subscription.resume_cursor`).
+        It is opaque: store it and send it back.
         """
         if self._subscribed:
             raise TessariError("this connection is already a subscription")
@@ -149,9 +159,13 @@ class Connection:
         w.u8(0 if table is None else 1)
         if table is not None:
             w.text(table)
+        # Last and only when present (§3.7): without it this is the frame every
+        # earlier node reads.
+        if cursor is not None:
+            w.text(cursor)
         frames.send(self._sock, frames.SUBSCRIBE, w.bytes())
         self._subscribed = True
-        return Subscription(self, from_)
+        return Subscription(self, from_, cursor)
 
     def close(self) -> None:
         try:
@@ -222,10 +236,12 @@ class Subscription:
     new connection and subscribe again from :attr:`resume_from`.
     """
 
-    def __init__(self, conn: Connection, from_: int) -> None:
+    def __init__(self, conn: Connection, from_: int, cursor: str | None = None) -> None:
         self._conn = conn
         #: The position to resume from: the last sequence handled, plus one.
         self.resume_from = from_
+        #: On a feed over a split table, the cursor to resume from instead.
+        self.resume_cursor = cursor
 
     def __iter__(self) -> Iterator[Change]:
         while True:
@@ -256,6 +272,8 @@ class Subscription:
                 raise UnknownFrame(kind)
             change = _change(body)
             self.resume_from = change.sequence + 1
+            if change.cursor is not None:
+                self.resume_cursor = change.cursor
             yield change
 
     def close(self) -> None:
@@ -269,10 +287,14 @@ def _change(body: bytes) -> Change:
     identity = r.text("a change's identity")
     fate = r.u8("what became of a record")
     if fate == 0:
-        return Change(sequence, table, identity, False, decode(r.lenbytes("a change's value")))
-    if fate == 1:
-        return Change(sequence, table, identity, True, None)
-    raise Malformed(f"a change is written (0) or removed (1), not {fate}")
+        removed, value = False, decode(r.lenbytes("a change's value"))
+    elif fate == 1:
+        removed, value = True, None
+    else:
+        raise Malformed(f"a change is written (0) or removed (1), not {fate}")
+    # §3.8: bytes after the change are its cursor; none means the feed has none.
+    cursor = None if r.exhausted else r.text("a change's cursor")
+    return Change(sequence, table, identity, removed, value, cursor)
 
 
 def _elsewhere(body: bytes) -> Elsewhere:
