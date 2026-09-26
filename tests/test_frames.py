@@ -282,6 +282,11 @@ class Bodies(unittest.TestCase):
         with self.assertRaises(Malformed):
             _change((9).to_bytes(8, "big") + text("thing") + text("1") + b"\x63")
 
+    def test_a_change_from_a_split_table_carries_its_cursor(self) -> None:
+        removed = (9).to_bytes(8, "big") + text("thing") + text("1") + b"\x01"
+        self.assertIsNone(_change(removed).cursor)
+        self.assertEqual(_change(removed + text("0:9,2:3")).cursor, "0:9,2:3")
+
     def test_a_redirect_is_settled_or_transient_and_zero_is_neither(self) -> None:
         # Zero is deliberately unassigned: it is what a truncated or zeroed
         # buffer holds, and giving it a meaning would let corruption decode as a
