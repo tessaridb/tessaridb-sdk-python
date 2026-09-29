@@ -223,6 +223,37 @@ consumer. The behaviour is the protocol repository's `spec/consumer-v1.md`,
 which every client follows, and the statements it sends are checked against
 all 14 cases of `conformance/consumer-v1.json`.
 
+## A space as a cache, a counter and a lock
+
+A space (`DEFINE SPACE`) keeps one value per key with an optional expiry.
+`Cache` makes each use one call over a connection you hold; a ttl is seconds or
+a `timedelta`:
+
+```python
+import tessaridb
+from tessaridb import Cache, Text
+
+conn = tessaridb.connect("127.0.0.1:9080")
+cache = Cache(conn, "app", "main", "cache")
+
+cache.set("session:abc", Text("ada"), ttl=1800)
+page = cache.get_or_set("page:/", 60, lambda: Text("<html>…"))
+hits = cache.incr("hits")
+
+lease = cache.lock("nightly-report", ttl=30)
+if lease is not None:
+    ...  # work, calling lease.extend() before 30 s pass
+    lease.release()
+```
+
+Two rules the class is built around: **a plain `set` clears an expiry the key
+had** — pass the ttl on every write that must keep one — and **a lock is a
+lease, not a mutex**: past its ttl another holder may take it. `release` is an
+expiring conditional write, never a delete, so a lease that lapsed cannot remove
+the next holder's lock. `ttl()` keeps the store's two absences apart: a
+`Duration`, `NULL` for never expires, `NONE` for no key. The statements are the
+protocol repository's `spec/cache-v1.md`, which every client follows.
+
 ## There is no TLS on this protocol
 
 Credentials travel as given. Run this on a protected network, or behind something
