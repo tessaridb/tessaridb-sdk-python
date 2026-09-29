@@ -9,6 +9,7 @@ from ._bytes import ProtocolError
 from ._decode import decode
 from ._encode import encode
 from .connection import Change, Connection, Elsewhere, Reply, Subscription, connect
+from .cache import Cache, Lease, NotACacheArgument
 from .consumer import Ack, Consumer, Leave, Message, Nack, Settle
 from .errors import (
     IoError,
@@ -45,6 +46,9 @@ __all__ = [
     "Reply",
     "Elsewhere",
     "Change",
+    "Cache",
+    "Lease",
+    "NotACacheArgument",
     "Consumer",
     "Message",
     "Ack",
