@@ -226,6 +226,55 @@ class OpenStore(unittest.TestCase):
             self.node.listing("py-http", "app", "docs")
 
 
+class Series(unittest.TestCase):
+    """``POST /series`` (§5.9): the node reads back what this client spelled."""
+
+    def setUp(self) -> None:
+        address = os.environ.get("TESSARIDB_TEST_HTTP")
+        if not address:
+            self.skipTest("set TESSARIDB_TEST_HTTP=<host:port> to run the HTTP tests")
+        self.node = HTTPClient(address)
+        self.node.script(
+            "DEFINE NAMESPACE IF NOT EXISTS pyhttp; USE NAMESPACE pyhttp;"
+            " DEFINE DATABASE IF NOT EXISTS app; USE DATABASE app;"
+            " DEFINE SERIES IF NOT EXISTS readings RETAIN 36500d TIME at;"
+        )
+        # A run of its own, so a node shared between runs cannot answer for it.
+        self.run_id = os.urandom(6).hex()
+
+    def event(self, second: int, sensor: str) -> tessaridb.Object:
+        return tessaridb.Object(
+            {
+                "run": tessaridb.Text(self.run_id),
+                "sensor": tessaridb.Text(sensor),
+                "v": tessaridb.Float(1.5e300),
+                "note": tessaridb.Text("it's \\ fine"),
+                "at": tessaridb.Datetime(1_790_676_000 + second, 0),
+            }
+        )
+
+    def stored(self) -> list[tuple[str, str]]:
+        (outcome,) = self.node.script(
+            f"{USE} SELECT sensor, note FROM readings WHERE run = '{self.run_id}';",
+            Reading(ObjectKind({"sensor": TextKind(), "note": TextKind()})),
+        )[-1:]
+        assert isinstance(outcome, ScriptRecords)
+        return [
+            (row.value.fields["sensor"].value, row.value.fields["note"].value)
+            for row in outcome.rows
+        ]
+
+    def test_a_batch_lands_whole_in_event_time_order_or_not_at_all(self) -> None:
+        self.assertEqual(
+            self.node.append("pyhttp", "app", "readings", [self.event(2, "b"), self.event(1, "a")]),
+            2,
+        )
+        with self.assertRaises(HTTPError) as refused:
+            self.node.append("pyhttp", "app", "readings", [self.event(3, "c"), tessaridb.Object({})])
+        self.assertEqual(refused.exception.status, 400)
+        self.assertEqual(self.stored(), [("a", "it's \\ fine"), ("b", "it's \\ fine")])
+
+
 class ClosedStore(unittest.TestCase):
     def setUp(self) -> None:
         address = os.environ.get("TESSARIDB_TEST_HTTP_CLOSED")
