@@ -146,30 +146,25 @@ class OpenStore(unittest.TestCase):
         self.assertIsNone(self.node.listing("pyhttp", "app", "thing"))
         self.assertIsNone(self.node.listing("pyhttp", "app", "nothingdeclared"))
 
-    def test_this_node_chunks_a_backup_once_the_log_is_big_enough_Q_PY_009(self) -> None:
-        """A known divergence, asserted so it is loud rather than silent — and
-        the assertion is now SIZE-BOUND, which is the part that was missing.
-
-        §5.3 requires every response on this surface to declare its length and
-        forbids `Transfer-Encoding: chunked` on **any** route, naming
+    def test_a_large_backup_declares_its_length_Q_PY_009(self) -> None:
+        """§5.3 requires every response on this surface to declare its length
+        and forbids `Transfer-Encoding: chunked` on **any** route, naming
         `GET /backup` as the one whose body has no small upper bound and which
         must still declare it.
 
-        Measured against `0.3.0-beta`: a backup of ~23 kB came back with
-        `Content-Length` and one of ~38 kB came back chunked. So the earlier
-        version of this test, which simply asked whether the route chunks, passes
-        on a fresh store and fails on a used one — and a suite that seeds a small
-        fixture would have reported the divergence FIXED. It is not fixed; it is
-        conditional, which is worse, because the small case is the one a test
-        writes and the large case is the one production has. Q-PY-009.
+        Up to `0.10.0-beta` the node answered a backup of more than ~38 kB
+        chunked while a small one came back with `Content-Length` — so this test
+        is SIZE-BOUND: a small fixture passes on the divergent node too, and the
+        large case is the one production has. `0.11.0-beta` declares the length
+        at every size. Q-PY-009.
 
-        The framing is READ rather than refused: §5.3's refusal is for a framing
-        a client does not RECOGNISE, and chunked is recognised.
+        The client still READS a chunked backup, since a node before 0.11 sends
+        one: §5.3's refusal is for a framing a client does not RECOGNISE, and
+        chunked is recognised.
         """
         import http.client
 
-        # Deliberately over the threshold, so this asserts the same thing on a
-        # fresh store and on a used one.
+        # Deliberately over the size at which older nodes chunked.
         self.node.put("pyhttp", "app", "docs", "big.bin", b"\x00" * 128 * 1024)
         self.addCleanup(self.node.delete, "pyhttp", "app", "docs", "big.bin")
 
@@ -178,9 +173,11 @@ class OpenStore(unittest.TestCase):
         try:
             connection.request("GET", "/backup")
             backup = connection.getresponse()
-            self.assertEqual(backup.getheader("Transfer-Encoding"), "chunked", "specified as absent")
-            self.assertIsNone(backup.getheader("Content-Length"), "§5.3 requires one")
-            backup.read()
+            self.assertIsNone(backup.getheader("Transfer-Encoding"), "§5.3 forbids chunked")
+            declared = backup.getheader("Content-Length")
+            body = backup.read()
+            self.assertGreater(len(body), 128 * 1024, "the object is in the backup")
+            self.assertEqual(declared, str(len(body)), "§5.3 requires the length, and the right one")
         finally:
             connection.close()
 
