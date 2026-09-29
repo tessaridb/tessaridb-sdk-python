@@ -9,6 +9,7 @@ from ._bytes import ProtocolError
 from ._decode import decode
 from ._encode import encode
 from .connection import Change, Connection, Elsewhere, Reply, Subscription, connect
+from .consumer import Ack, Consumer, Leave, Message, Nack, Settle
 from .errors import (
     IoError,
     Malformed,
@@ -43,6 +44,12 @@ __all__ = [
     "Reply",
     "Elsewhere",
     "Change",
+    "Consumer",
+    "Message",
+    "Ack",
+    "Nack",
+    "Leave",
+    "Settle",
     "ProtocolError",
     "TessariError",
     "IoError",

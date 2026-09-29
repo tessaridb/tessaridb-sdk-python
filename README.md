@@ -187,6 +187,41 @@ the last sequence handled plus one. That arithmetic is this client's rather than
 yours: resuming at a position already handled delivers it twice and resuming past
 one reports being caught up, and both mistakes are silent.
 
+## Consuming a topic
+
+A topic's consumer group (`DEFINE GROUP`, engine `0.12.0-beta` or later) hands
+each message to one member and forgets it only when it is acknowledged.
+`Consumer` reads under a group and calls your function once per message, in
+order:
+
+```python
+import threading
+import tessaridb
+from tessaridb import Ack, Consumer, Leave, Nack
+
+conn = tessaridb.connect("127.0.0.1:9080")
+consumer = Consumer(conn, "app", "main", "jobs", "workers", batch=10)
+
+# Automatic: returning acknowledges the message, raising hands it back at once.
+def handle(message):
+    print(message.position, message.deliveries, message.value)
+
+threading.Thread(target=consumer.run_auto, args=(handle,)).start()
+# ... later, from anywhere:
+consumer.stop()
+
+# Manual: return Ack(), Nack(delay=5.0), or Leave() for the group's deadline.
+consumer.run_manual(lambda message: Ack())
+```
+
+The loop is synchronous, like every call in this client — run it in a thread
+of its own. Both modes are **at least once**: make an effect outside the store
+idempotent, keyed by the topic, the group and `message.position`. The group, not
+the connection, holds the state, so a restarted process carries on where the
+group stands, and the group is declared in the store rather than by the
+consumer. The behaviour is the protocol repository's `spec/consumer-v1.md`,
+which every client follows.
+
 ## There is no TLS on this protocol
 
 Credentials travel as given. Run this on a protected network, or behind something
