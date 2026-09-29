@@ -23,6 +23,7 @@ from .errors import (
     WrongVersion,
 )
 from .health import Health, Healthy, Leaving, Unwell
+from ._events import NotAnEvent
 from .http import FileEntry, HTTPClient, HTTPError
 from .kind import *  # noqa: F401,F403 — the declared kinds are the public surface
 from .kind import __all__ as _kind_names
@@ -76,6 +77,7 @@ __all__ = [
     "Delete",
     "HTTPClient",
     "HTTPError",
+    "NotAnEvent",
     "FileEntry",
     "Health",
     "Healthy",

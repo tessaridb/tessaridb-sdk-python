@@ -29,12 +29,15 @@ import base64
 import http.client
 import json
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 
+from ._events import batch, series_path
 from ._files import FileEntry, bucket_path, file_path, read_entry
 from .errors import Malformed, TessariError
 from .health import Health, read_health
 from .script import Reading, ScriptOutcome, read_results
+from .value import Value
 
 __all__ = ["HTTPClient", "HTTPError", "FileEntry"]
 
@@ -122,6 +125,26 @@ class HTTPClient:
         if answer.status == 404:
             return None
         return tuple(read_entry(f) for f in _json(answer.body).get("files", []))
+
+    def append(self, namespace: str, database: str, series: str, events: Sequence[Value]) -> int:
+        """Append a batch of events to a series in ONE transaction, and answer
+        how many landed (§5.9). Every event is an ``Object``.
+
+        The batch lands whole or not at all, and it is **not** idempotent: sent
+        twice it lands twice. So it is sent once — a transport failure after the
+        request left may mean it landed, and only the caller knows whether a
+        second copy would be harmless. The one resend is after a ``401`` on a
+        lapsed token, which the node answers before running anything.
+
+        ``NotAnEvent`` is raised before anything is sent, for an event that is
+        not an object or holds a kind an event cannot carry.
+        """
+        body = batch(events).encode("utf-8")
+        answer = self._send("POST", series_path(namespace, database, series), body, "text/plain")
+        appended = _json(answer.body).get("appended")
+        if not isinstance(appended, int):
+            raise Malformed("the node's answer does not say how many landed")
+        return appended
 
     def backup(self, since: int | None = None) -> bytes:
         """The whole log in one response — there is no resumption and no range

@@ -81,6 +81,50 @@ def _whole(value: Value | None) -> int:
     raise ValueError(f"expected a whole number, got {value!r}")
 
 
+class _Statements:
+    """The statements a consumer sends (§2), rendered in one place.
+
+    The consumer builds its text through nothing else, so the shared corpus
+    (``consumer-v1.json``) checking this class checks what actually goes out.
+    Names are checked here, once, before anything is sent (§3).
+    """
+
+    def __init__(self, namespace: str, database: str, topic: str, group: str) -> None:
+        for what, name in (("a namespace", namespace), ("a database", database), ("a topic", topic)):
+            if not _NAME.match(name):
+                raise BuilderError("not-a-name", what, name)
+        if not _GROUP.match(group):
+            raise BuilderError("not-a-name", "a group", group)
+        # Sent with every statement: a connection that reconnected has forgotten
+        # any earlier USE (§5).
+        self._tenancy = f"USE NAMESPACE {namespace}; USE DATABASE {database}; "
+        self._topic = topic
+        self._group = group
+
+    def read(self, limit: int) -> str:
+        return f"{self._tenancy}READ FROM {self._topic} FOR CONSUMER '{self._group}' LIMIT {limit};"
+
+    def ack(self, positions: tuple[int, ...]) -> tuple[str, dict[str, Value]]:
+        return self._settle("ACK", positions, "")
+
+    def nack(self, positions: tuple[int, ...], delay: float | None) -> tuple[str, dict[str, Value]]:
+        # A delay is a duration literal in the grammar, not a parameter, written
+        # from a number formatted here and never from a caller's text.
+        millis = int(delay * 1000) if delay is not None else 0
+        tail = f" DELAY {millis}ms" if millis > 0 else ""
+        return self._settle("NACK", positions, tail)
+
+    def _settle(self, verb: str, positions: tuple[int, ...], tail: str) -> tuple[str, dict[str, Value]]:
+        names = [f"p{index}" for index in range(len(positions))]
+        script = (
+            f"{self._tenancy}{verb} {self._topic} FOR CONSUMER '{self._group}' AT "
+            + ", ".join(f"${name}" for name in names)
+            + tail
+            + ";"
+        )
+        return script, {name: Integer(position) for name, position in zip(names, positions)}
+
+
 class Consumer:
     """A member of ``group`` reading ``topic`` in ``namespace``/``database``.
 
@@ -99,17 +143,8 @@ class Consumer:
         group: str,
         batch: int = 10,
     ) -> None:
-        for what, name in (("a namespace", namespace), ("a database", database), ("a topic", topic)):
-            if not _NAME.match(name):
-                raise BuilderError("not-a-name", what, name)
-        if not _GROUP.match(group):
-            raise BuilderError("not-a-name", "a group", group)
+        self._statements = _Statements(namespace, database, topic, group)
         self._connection = connection
-        # Sent with every statement: a connection that reconnected has forgotten
-        # any earlier USE (§5).
-        self._tenancy = f"USE NAMESPACE {namespace}; USE DATABASE {database}; "
-        self._topic = topic
-        self._group = group
         self._batch = max(1, batch)
         self._stopped = threading.Event()
 
@@ -148,25 +183,15 @@ class Consumer:
     def ack(self, *positions: int) -> int:
         """Acknowledge these positions; answers how many were in flight. One that
         was not counts nothing and is not an error."""
-        return self._settle(f"ACK {self._topic} FOR CONSUMER '{self._group}' AT ", positions, "")
+        return self._settle(*self._statements.ack(positions)) if positions else 0
 
     def nack(self, *positions: int, delay: float | None = None) -> int:
         """Hand these positions back, now or after ``delay`` seconds; answers how
         many were in flight."""
-        # A delay is a duration literal in the grammar, not a parameter, written
-        # from a number formatted here and never from a caller's text.
-        millis = int(delay * 1000) if delay is not None else 0
-        tail = f" DELAY {millis}ms" if millis > 0 else ""
-        return self._settle(f"NACK {self._topic} FOR CONSUMER '{self._group}' AT ", positions, tail)
+        return self._settle(*self._statements.nack(positions, delay)) if positions else 0
 
-    def _settle(self, statement: str, positions: tuple[int, ...], tail: str) -> int:
-        if not positions:
-            return 0
-        names = [f"p{index}" for index in range(len(positions))]
-        script = self._tenancy + statement + ", ".join(f"${name}" for name in names) + tail + ";"
-        reply = self._connection.execute(
-            script, {name: Integer(position) for name, position in zip(names, positions)}
-        )
+    def _settle(self, script: str, parameters: dict[str, Value]) -> int:
+        reply = self._connection.execute(script, parameters)
         answered = reply.outcomes[-1] if reply.outcomes else None
         if not isinstance(answered, ValueOutcome):
             raise ValueError(f"an acknowledgement answered {answered!r}")
@@ -175,9 +200,7 @@ class Consumer:
     def _next_batch(self) -> list[Message] | None:
         wait = FIRST_WAIT
         while not self._stopped.is_set():
-            reply = self._connection.execute(
-                f"{self._tenancy}READ FROM {self._topic} FOR CONSUMER '{self._group}' LIMIT {self._batch};"
-            )
+            reply = self._connection.execute(self._statements.read(self._batch))
             answered = reply.outcomes[-1] if reply.outcomes else None
             if not isinstance(answered, Records):
                 raise ValueError(f"a group read answered {answered!r}")
