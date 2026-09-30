@@ -27,15 +27,15 @@ from __future__ import annotations
 
 import socket
 from dataclasses import dataclass
-from typing import Iterator, Mapping
+from typing import Callable, Iterator, Mapping
 
 from . import _frames as frames
 from ._answer import read_answer
 from ._bytes import Reader, Writer
 from ._decode import decode
 from ._encode import encode
-from .errors import IoError, Malformed, Refused, TessariError, UnknownFrame
-from .outcome import Outcome
+from .errors import IoError, Malformed, NodeTooOld, Refused, TessariError, UnknownFrame
+from .outcome import Outcome, ValueOutcome
 from .value import Value
 
 __all__ = ["Connection", "connect", "Reply", "Elsewhere", "Change", "Subscription"]
@@ -166,6 +166,28 @@ class Connection:
         frames.send(self._sock, frames.SUBSCRIBE, w.bytes())
         self._subscribed = True
         return Subscription(self, from_, cursor)
+
+    def _vault(self, body: Callable[[tuple[str, str] | None], bytes]) -> Value:
+        """Send one Vault frame (§3.14) and return the status value it answers.
+
+        ``body`` is given the credentials when this connection still owes them —
+        the frame carries them as a Request does — and ``None`` otherwise. Nothing
+        is sent to a node whose minor is below the frame's.
+        """
+        if self.minor < frames.VAULT_MINOR:
+            raise NodeTooOld(self.minor, frames.VAULT_MINOR)
+        if self._subscribed:
+            raise TessariError("this connection is a subscription and no longer answers statements")
+        credentials = None
+        if self._owed and self._user is not None:
+            credentials = (self._user, self._password or "")
+            self._owed = False
+        frames.send(self._sock, frames.VAULT, body(credentials))
+        reply = self._reply()
+        answered = reply.outcomes[0] if len(reply.outcomes) == 1 else None
+        if not isinstance(answered, ValueOutcome):
+            raise Malformed("a vault frame is answered with one value")
+        return answered.value
 
     def close(self) -> None:
         try:

@@ -254,6 +254,33 @@ the next holder's lock. `ttl()` keeps the store's two absences apart: a
 `Duration`, `NULL` for never expires, `NONE` for no key. The statements are the
 protocol repository's `spec/cache-v1.md`, which every client follows.
 
+## A vault, and its passphrase
+
+A vault (`DEFINE VAULT`) keeps `SECRET` fields encrypted in every copy that is not a
+running, unsealed node. The passphrase goes in a frame of its own, never in a
+statement, and is in no error or `repr` this client produces:
+
+```python
+import tessaridb
+from tessaridb import Text, Vault
+
+conn = tessaridb.connect("127.0.0.1:9080")
+tessaridb.unseal(conn, store_passphrase)            # the store's key, for ten minutes
+
+vault = Vault(conn, "app", "main", "team")
+vault.write("github", {"password": Text("hunter2")})  # creates or edits, keeps recipients
+page = vault.list(limit=100)                         # ids only, never a value
+secret = vault.reveal("github", ["password"])
+```
+
+A vault declared `DEFINE VAULT team PASSPHRASE '…'` opens with its own passphrase
+instead, and the store's opens nothing in it: `vault.status()`, `vault.unseal(…)`,
+`vault.seal()` and `vault.change_passphrase(…)` act on that vault alone, and
+`status().custody` says which kind a vault is. An unseal lasts the node's period and
+then closes by itself; a refusal after a run of wrong passphrases means **wait**, and
+is not retried here. The statements and frames are the protocol repository's
+`spec/vault-v1.md`.
+
 ## There is no TLS on this protocol
 
 Credentials travel as given. Run this on a protected network, or behind something

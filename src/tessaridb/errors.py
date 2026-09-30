@@ -32,6 +32,7 @@ __all__ = [
     "Malformed",
     "NoWritablePeer",
     "Refused",
+    "NodeTooOld",
 ]
 
 
@@ -107,3 +108,13 @@ class Refused(TessariError):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class NodeTooOld(TessariError):
+    """The node's greeting names a minor below the one a call needs, so nothing
+    was sent: a frame an older node does not know closes the connection (§2.3)."""
+
+    def __init__(self, found: int, needed: int) -> None:
+        super().__init__(f"this node speaks protocol minor {found}; the vault frame needs {needed} or later")
+        self.found = found
+        self.needed = needed

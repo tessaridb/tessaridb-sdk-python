@@ -10,10 +10,24 @@ from ._decode import decode
 from ._encode import encode
 from .connection import Change, Connection, Elsewhere, Reply, Subscription, connect
 from .cache import Cache, Lease, NotACacheArgument
+from .vault import (
+    Custody,
+    NotAVaultArgument,
+    Page,
+    SealState,
+    Vault,
+    VaultStatus,
+    change_passphrase,
+    seal,
+    unseal,
+    vault_audit,
+    vault_status,
+)
 from .consumer import Ack, Consumer, Leave, Message, Nack, Settle
 from .errors import (
     IoError,
     Malformed,
+    NodeTooOld,
     NoWritablePeer,
     NotThisProtocol,
     Refused,
@@ -49,6 +63,18 @@ __all__ = [
     "Cache",
     "Lease",
     "NotACacheArgument",
+    "Vault",
+    "VaultStatus",
+    "SealState",
+    "Custody",
+    "Page",
+    "NotAVaultArgument",
+    "vault_status",
+    "unseal",
+    "seal",
+    "change_passphrase",
+    "vault_audit",
+    "NodeTooOld",
     "Consumer",
     "Message",
     "Ack",

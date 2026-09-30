@@ -38,6 +38,10 @@ REFUSAL = 3
 SUBSCRIBE = 4
 CHANGE = 5
 ELSEWHERE = 13
+#: The vault frame (§3.14), sent only to a node whose greeting says minor 2 or
+#: later: an older one does not know the tag and closes the connection.
+VAULT = 17
+VAULT_MINOR = 2
 
 #: The kinds a node may send us. Checked as a set membership and never as a
 #: range: that the client's tags are low and contiguous describes today's
