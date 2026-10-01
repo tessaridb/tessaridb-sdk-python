@@ -29,6 +29,7 @@ import socket
 from dataclasses import dataclass
 from typing import Callable, Iterator, Mapping
 
+from . import _follow
 from . import _frames as frames
 from ._answer import read_answer
 from ._bytes import Reader, Writer
@@ -131,11 +132,29 @@ class Connection:
 
         A refusal does not close the connection: a client that mistyped a
         statement has not stopped being a client.
+
+        A redirect (§3.12) is followed to the node it names — at most three hops,
+        the node there checked with ``session::context()``, this session's
+        namespace and database selected there first. A ``settled`` redirect moves
+        this connection to that node; a ``transient`` one answers and stays here.
         """
+        reply = self._ask(script, parameters or {})
+        if reply.redirect is None:
+            return reply
+        return _follow.followed(self, script, parameters or {}, reply.redirect)
+
+    def _ask(self, script: str, parameters: Mapping[str, Value]) -> Reply:
+        """One request and its reply, a redirect returned rather than followed."""
         if self._subscribed:
             raise TessariError("this connection is a subscription and no longer answers statements")
-        frames.send(self._sock, frames.REQUEST, self._request(script, parameters or {}))
+        frames.send(self._sock, frames.REQUEST, self._request(script, parameters))
         return self._reply()
+
+    def _move_to(self, there: Connection) -> None:
+        """Become ``there``: a settled redirect says the session's data lives on
+        that node now. This connection's socket is closed."""
+        self.close()
+        self._sock, self.minor, self._owed = there._sock, there.minor, there._owed
 
     def subscribe(
         self, from_: int = 0, table: str | None = None, cursor: str | None = None

@@ -33,6 +33,10 @@ __all__ = [
     "NoWritablePeer",
     "Refused",
     "NodeTooOld",
+    "RedirectLoop",
+    "StaleRedirect",
+    "WrongNode",
+    "NotFollowable",
 ]
 
 
@@ -118,3 +122,41 @@ class NodeTooOld(TessariError):
         super().__init__(f"this node speaks protocol minor {found}; the vault frame needs {needed} or later")
         self.found = found
         self.needed = needed
+
+
+class RedirectLoop(TessariError):
+    """Three redirects followed and still no answer (§3.12). Going on would not
+    tell a loop from a cluster moving faster than the request."""
+
+    def __init__(self, hops: int) -> None:
+        super().__init__(f"still redirected after {hops} hops; stopping rather than going round")
+        self.hops = hops
+
+
+class StaleRedirect(TessariError):
+    """A redirect dated by an older leadership than one this request already
+    followed: it was decided before that one, and points at the past."""
+
+    def __init__(self, epoch: int, floor: int) -> None:
+        super().__init__(f"redirected under epoch {epoch} after following epoch {floor}")
+        self.epoch = epoch
+        self.floor = floor
+
+
+class WrongNode(TessariError):
+    """The address a redirect named answered as a different node, so the request
+    was not sent there."""
+
+    def __init__(self, expected: bytes) -> None:
+        super().__init__("the redirect named another node than the one that answered there")
+        self.expected = expected
+
+
+class NotFollowable(TessariError):
+    """The session's namespace or database is not a plain name, so it is not
+    selected again on the node a redirect named: a name is grammar, and this
+    client does not quote one into a script."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"cannot follow: {name!r} is not a plain name to select on the other node")
+        self.name = name
