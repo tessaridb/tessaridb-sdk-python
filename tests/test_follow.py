@@ -8,6 +8,7 @@ without a cluster.
 
 from __future__ import annotations
 
+import os
 import socket
 import sys
 import threading
@@ -27,7 +28,7 @@ from tessaridb.errors import (  # noqa: E402
     StaleRedirect,
     WrongNode,
 )
-from tessaridb.outcome import ValueOutcome  # noqa: E402
+from tessaridb.outcome import Records, ValueOutcome  # noqa: E402
 from tessaridb.value import Integer, NullValue, Object, Text, Uuid, Value  # noqa: E402
 
 A, B, C = bytes([0xA] * 16), bytes([0xB] * 16), bytes([0xC] * 16)
@@ -236,6 +237,48 @@ class FollowingTest(unittest.TestCase):
             conn.execute(READ)
         self.assertEqual(raised.exception.name, "pr-od")
         self.assertEqual(b.seen, [], "B was never dialled")
+
+
+
+class LiveClusterTest(unittest.TestCase):
+    """A write and a leader-only read sent to a follower of a real two-node
+    cluster land on the leader, the read by a transient redirect this client
+    follows. ``TESSARIDB_TEST_CLUSTER=<leader host:port>,<follower host:port>``,
+    a cluster whose namespace ``prod`` holds database ``shop`` with collection
+    ``ledger``."""
+
+    def test_a_misrouted_write_and_read_land_on_the_leader(self) -> None:
+        cluster = os.environ.get("TESSARIDB_TEST_CLUSTER")
+        if not cluster:
+            self.skipTest("TESSARIDB_TEST_CLUSTER is not set")
+        leader, follower = cluster.split(",")
+        tenancy = "USE NAMESPACE prod; USE DATABASE shop;"
+        key = f"python{os.getpid()}"
+
+        def node_of(conn) -> Value:
+            answered = conn.execute(CONTEXT).outcomes[-1]
+            assert isinstance(answered, ValueOutcome) and isinstance(answered.value, Object)
+            return answered.value.fields["node"]
+
+        with connect(follower) as writer:
+            # A forward carries the script and not the session.
+            writer.execute(f"{tenancy} CREATE ledger:'{key}' = {{ total: 1 }};")
+        with connect(leader) as on_leader:
+            leader_node = node_of(on_leader)
+            on_leader.execute(tenancy)
+            found = on_leader.execute(f"SELECT * FROM ledger:'{key}';").outcomes[-1]
+            assert isinstance(found, Records)
+            self.assertEqual(len(found.rows), 1, "the write landed on the leader")
+        with connect(follower) as reader:
+            follower_node = node_of(reader)
+            self.assertNotEqual(leader_node, follower_node)
+            reader.execute(tenancy)
+            reply = reader.execute(f"SELECT * FROM ledger:'{key}' ANSWERED BY LEADER;")
+            self.assertIsNone(reply.redirect, "the redirect was followed")
+            answered = reply.outcomes[-1]
+            assert isinstance(answered, Records)
+            self.assertEqual(len(answered.rows), 1, "the leader answered")
+            self.assertEqual(node_of(reader), follower_node, "a transient redirect stays here")
 
 
 if __name__ == "__main__":
