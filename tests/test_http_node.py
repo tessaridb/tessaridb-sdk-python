@@ -190,7 +190,7 @@ class OpenStore(unittest.TestCase):
         finally:
             connection.close()
 
-    def test_a_backup_is_the_whole_log_in_one_response(self) -> None:
+    def test_a_backup_is_the_whole_store_in_one_response(self) -> None:
         # Unauthenticated on a store with no DEFINE USER: the open-store rule at
         # its loudest, not a defect.
         self.assertGreater(len(self.node.backup()), 0)
