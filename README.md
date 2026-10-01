@@ -91,8 +91,14 @@ all, whose remedy is a statement nobody ran rather than anything on the network.
 **A redirect is not an error and does not arrive as one.** It is an instruction,
 and a client that handles failures correctly — logs them, retries a bounded
 number of times, gives up — handles an instruction encoded as a failure
-incorrectly every time. So `reply.redirect` carries it, and `reply.outcomes` is
-empty when it does.
+incorrectly every time. So it is never raised: `execute` follows it to the node
+it names — at most three hops, never to an older leadership than one already
+followed, and only after `session::context()` there says it is the node named
+(node `0.20.0-beta` and later). The session's namespace and database are
+selected there first, each only if it is a plain name (`[A-Za-z_][A-Za-z0-9_]*`).
+A *settled* redirect moves the connection to that node; a *transient* one
+answers and leaves it where it was. Each way following can stop is its own
+error: `RedirectLoop`, `StaleRedirect`, `WrongNode`, `NotFollowable`.
 
 ## Writing a statement
 
