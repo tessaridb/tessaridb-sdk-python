@@ -288,11 +288,28 @@ then closes by itself; a refusal after a run of wrong passphrases means **wait**
 is not retried here. The statements and frames are the protocol repository's
 `spec/vault-v1.md`.
 
-## There is no TLS on this protocol
+## TLS
 
-Credentials travel as given. Run this on a protected network, or behind something
-that terminates TLS. It is a property of the protocol rather than an omission
-here, and it is said out loud rather than left to be discovered.
+A node started with a certificate speaks TLS 1.3 on both ports and nothing else,
+and a cluster node serves clients in the clear only when its operator chose to
+(node `0.21.0-beta` and later). Give the client the authority that issued the
+node's certificate:
+
+```python
+import tessaridb
+
+tls = tessaridb.tls_context("ca.pem")   # or tls_context() for the system's store
+conn = tessaridb.connect("db.example:9080", "ada", password, tls=tls)
+http = tessaridb.HTTPClient("db.example:8000", "ada", password, tls=tls)
+```
+
+Every connection checks the node's certificate chain and that it names the host
+you dialled — a DNS name, or an IP address against the certificate's IP
+entries — including each node a redirect sends the request to. A context that
+does not check both is refused (`ValueError`), so there is no way to turn the
+check off. A failed handshake raises `TlsError`, which is not retried. Without
+`tls` the connection, credentials included, travels in the clear, which belongs
+on a network you protect.
 
 ## Objects, files and health
 

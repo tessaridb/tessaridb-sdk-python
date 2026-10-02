@@ -26,6 +26,7 @@ left to be discovered.
 from __future__ import annotations
 
 import socket
+import ssl
 from dataclasses import dataclass
 from typing import Callable, Iterator, Mapping
 
@@ -37,6 +38,7 @@ from ._decode import decode
 from ._encode import encode
 from .errors import IoError, Malformed, NodeTooOld, Refused, TessariError, UnknownFrame
 from .outcome import Outcome, ValueOutcome
+from .tls import verified, wrap
 from .value import Value
 
 __all__ = ["Connection", "connect", "Reply", "Elsewhere", "Change", "Subscription"]
@@ -94,13 +96,26 @@ class Change:
     cursor: str | None = None
 
 
-def connect(address: str, user: str | None = None, password: str | None = None) -> Connection:
+def connect(
+    address: str,
+    user: str | None = None,
+    password: str | None = None,
+    *,
+    tls: ssl.SSLContext | None = None,
+) -> Connection:
     """Dial ``host:port`` — a bare address, with no URL scheme.
 
     Credentials are optional because a store with no users declared is **open**
     and runs anything, which is what keeps an empty one usable. A closed store's
     refusal comes from the session, not from a second rule in this client.
+
+    ``tls`` — from :func:`~tessaridb.tls_context` — speaks TLS and checks the
+    node's certificate and name; without it the connection, credentials
+    included, is in the clear (§1.1). A redirect is followed with the same
+    ``tls``.
     """
+    if tls is not None:
+        verified(tls)
     host, _, port = address.rpartition(":")
     if not host or not port.isdigit():
         raise ValueError(f"an address is host:port, got {address!r}")
@@ -108,14 +123,23 @@ def connect(address: str, user: str | None = None, password: str | None = None) 
         sock = socket.create_connection((host, int(port)))
     except OSError as why:
         raise IoError(f"connecting to {address}: {why}") from why
-    return Connection(sock, user, password)
+    if tls is not None:
+        sock = wrap(sock, tls, address)
+    return Connection(sock, user, password, tls)
 
 
 class Connection:
     """One session. Build it with :func:`connect`."""
 
-    def __init__(self, sock: socket.socket, user: str | None, password: str | None) -> None:
+    def __init__(
+        self,
+        sock: socket.socket,
+        user: str | None,
+        password: str | None,
+        tls: ssl.SSLContext | None = None,
+    ) -> None:
         self._sock = sock
+        self._tls = tls
         self._user = user
         self._password = password
         self._owed = user is not None
