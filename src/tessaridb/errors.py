@@ -49,6 +49,14 @@ class IoError(TessariError):
     """The socket failed. Retry the transport."""
 
 
+class TlsError(TessariError):
+    """TLS with the node failed — the handshake, its name, its chain (§1.1).
+
+    The transport class, and deliberately not :class:`IoError`: nothing about the
+    next attempt at the same node would differ, so it is not retried.
+    """
+
+
 class NotThisProtocol(TessariError):
     """The peer did not greet with ``TESS``. The address is wrong."""
 

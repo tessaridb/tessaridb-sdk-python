@@ -42,7 +42,7 @@ def followed(
         if redirect.epoch < floor:
             raise StaleRedirect(redirect.epoch, floor)
         floor = redirect.epoch
-        there = connect(redirect.endpoint, conn._user, conn._password)
+        there = connect(redirect.endpoint, conn._user, conn._password, tls=conn._tls)
         try:
             if _context(there).get("node") != Uuid(redirect.node):
                 raise WrongNode(redirect.node)

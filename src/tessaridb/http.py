@@ -28,15 +28,17 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import ssl
 import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ._events import batch, series_path
 from ._files import FileEntry, bucket_path, file_path, read_entry
-from .errors import Malformed, TessariError
+from .errors import Malformed, TessariError, TlsError
 from .health import Health, read_health
 from .script import Reading, ScriptOutcome, read_results
+from .tls import verified
 from .value import Value
 
 __all__ = ["HTTPClient", "HTTPError", "FileEntry"]
@@ -73,8 +75,18 @@ class _Answer:
 class HTTPClient:
     """Dial ``host:port`` — a bare address, with no URL scheme."""
 
-    def __init__(self, address: str, user: str | None = None, password: str | None = None) -> None:
+    def __init__(
+        self,
+        address: str,
+        user: str | None = None,
+        password: str | None = None,
+        *,
+        tls: ssl.SSLContext | None = None,
+    ) -> None:
+        """``tls`` — from :func:`~tessaridb.tls_context` — makes every request
+        HTTPS with the node's certificate and name checked (§1.1)."""
         self.address = address
+        self._tls = verified(tls) if tls is not None else None
         self._user = user
         self._password = password
         self._lock = threading.Lock()
@@ -257,9 +269,16 @@ class HTTPClient:
         if authorization is not None:
             headers["Authorization"] = authorization
         host, _, port = self.address.rpartition(":")
-        connection = http.client.HTTPConnection(host, int(port))
+        connection = (
+            http.client.HTTPConnection(host, int(port))
+            if self._tls is None
+            else http.client.HTTPSConnection(host, int(port), context=self._tls)
+        )
         try:
-            connection.request(method, where, body, headers)
+            try:
+                connection.request(method, where, body, headers)
+            except (ssl.SSLError, ssl.CertificateError) as why:
+                raise TlsError(f"TLS with {self.address} failed: {why}") from why
             response = connection.getresponse()
             # §5.3 requires every response on this surface to declare its
             # length and forbids `Transfer-Encoding: chunked` on any route,

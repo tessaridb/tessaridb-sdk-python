@@ -36,6 +36,7 @@ from .errors import (
     NotThisProtocol,
     Refused,
     TessariError,
+    TlsError,
     TooLarge,
     Truncated,
     UnknownFrame,
@@ -49,6 +50,7 @@ from .kind import __all__ as _kind_names
 from .query import BuilderError, Filter, Operator, Rendered, compare
 from .script import *  # noqa: F401,F403 — the script outcome model is the public surface
 from .script import __all__ as _script_names
+from .tls import tls_context
 from .statement import Create, Delete, Select, Update, create, delete, select, update
 from .outcome import *  # noqa: F401,F403 — the outcome model is the public surface
 from .outcome import __all__ as _outcome_names
@@ -59,6 +61,8 @@ __all__ = [
     "encode",
     "decode",
     "connect",
+    "tls_context",
+    "TlsError",
     "Connection",
     "Subscription",
     "Reply",
