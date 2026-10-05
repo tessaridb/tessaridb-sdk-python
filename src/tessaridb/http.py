@@ -35,7 +35,7 @@ from dataclasses import dataclass
 
 from ._events import batch, series_path
 from ._files import FileEntry, bucket_path, file_path, read_entry
-from .errors import Malformed, TessariError, TlsError
+from .errors import Malformed, RefusalClass, TessariError, TlsError
 from .health import Health, read_health
 from .script import Reading, ScriptOutcome, read_results
 from .tls import verified
@@ -56,10 +56,15 @@ class HTTPError(TessariError):
     help.
     """
 
-    def __init__(self, status: int, message: str, location: str = "") -> None:
+    def __init__(
+        self, status: int, message: str, location: str = "", refusal_class: RefusalClass | None = None
+    ) -> None:
         super().__init__(f"{status}: {message}")
         self.status = status
         self.message = message
+        #: The class the body's ``code`` names (§5.4); ``None`` from a node before
+        #: protocol 1.3, or from something in between answering in its own words.
+        self.refusal_class = refusal_class
         #: Set on a `307`, which is an instruction rather than a failure — the
         #: HTTP form of the wire's Elsewhere frame.
         self.location = location
@@ -217,7 +222,7 @@ class HTTPClient:
         # routing behaviour must report it and stop rather than retry this node.
         # The address is in `Location`, because a redirect whose target a client
         # must parse out of prose is not a redirect.
-        raise HTTPError(answer.status, _message(answer.body), answer.location)
+        raise HTTPError(answer.status, _message(answer.body), answer.location, _code(answer.body))
 
     def _authorization(self) -> str | None:
         if self._user is None:
@@ -248,7 +253,7 @@ class HTTPClient:
             with self._lock:
                 self._sessionless = True
             return None
-        raise HTTPError(answer.status, _message(answer.body))
+        raise HTTPError(answer.status, _message(answer.body), refusal_class=_code(answer.body))
 
     def _discard(self) -> bool:
         with self._lock:
@@ -313,3 +318,11 @@ def _message(body: bytes) -> str:
         return json.loads(body).get("error", "")
     except ValueError:
         return body.decode("utf-8", "replace")
+
+
+def _code(body: bytes) -> RefusalClass | None:
+    try:
+        word = json.loads(body).get("code")
+    except (ValueError, AttributeError):
+        return None
+    return RefusalClass.from_word(word) if isinstance(word, str) else None

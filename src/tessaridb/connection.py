@@ -269,9 +269,9 @@ class Connection:
         if kind == frames.ANSWER:
             return Reply(outcomes=read_answer(body))
         if kind == frames.REFUSAL:
-            # §3.6: the body is the store's own message, whole, with no length
-            # prefix in front of it.
-            raise Refused(body.decode("utf-8", "replace"))
+            # §3.6: the class byte when the node sent one, then the store's own
+            # message, with no length prefix in front of it.
+            raise Refused(*reversed(frames.read_refusal(body)))
         if kind == frames.ELSEWHERE:
             return Reply(redirect=_elsewhere(body))
         # A Change on a connection that has not subscribed is an unknown frame
@@ -329,7 +329,7 @@ class Subscription:
                 # running node: a `Subscription` opened before `USE NAMESPACE`
                 # raised `UnknownFrame(3)`.
                 self._conn.close()
-                raise Refused(body.decode("utf-8", "replace"))
+                raise Refused(*reversed(frames.read_refusal(body)))
             if kind != frames.CHANGE:
                 # A redirect belongs to a read another node can answer. A
                 # subscription is a position in ONE node's log, so this stays.
