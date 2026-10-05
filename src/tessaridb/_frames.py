@@ -24,13 +24,13 @@ from __future__ import annotations
 
 import socket
 
-from .errors import IoError, NotThisProtocol, TooLarge, Truncated, UnknownFrame, WrongVersion
+from .errors import IoError, NotThisProtocol, RefusalClass, TooLarge, Truncated, UnknownFrame, WrongVersion
 
 CEILING = 16 * 1024 * 1024
 HEADER = 5
 MAGIC = b"TESS"
 MAJOR = 1
-MINOR = 1
+MINOR = 3
 
 REQUEST = 1
 ANSWER = 2
@@ -144,3 +144,11 @@ def read(sock: socket.socket) -> tuple[int, bytes] | None:
         # conversation rather than being stepped over.
         raise UnknownFrame(kind)
     return kind, _receive(sock, length, "a frame body")
+
+
+def read_refusal(body: bytes) -> tuple[RefusalClass | None, str]:
+    """A Refusal body (§3.6): a first byte of 0-9 is the class, anything else is the
+    first byte of a message from a node before protocol 1.3, which has no class."""
+    if body and body[0] <= 9:
+        return RefusalClass.from_byte(body[0]), body[1:].decode("utf-8", "replace")
+    return None, body.decode("utf-8", "replace")

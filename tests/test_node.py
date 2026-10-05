@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import tessaridb  # noqa: E402
-from tessaridb import Bool, Integer, Object, Records, Refused, Text, ValueOutcome  # noqa: E402
+from tessaridb import Bool, Integer, Object, Records, RefusalClass, Refused, Text, ValueOutcome  # noqa: E402
 
 SCHEMA = """
 DEFINE NAMESPACE IF NOT EXISTS pycorpus;
@@ -120,6 +120,7 @@ class Live(unittest.TestCase):
         with self.assertRaises(Refused) as caught:
             conn.execute(USE + " SELECT * FROM nosuchtable;")
         self.assertIn("nosuchtable", caught.exception.message)
+        self.assertEqual(caught.exception.refusal_class, RefusalClass.INVALID)
         # A refusal is an answer, not a fault: a client that mistyped a statement
         # has not stopped being a client.
         conn.execute(USE + " SELECT * FROM thing:1;")

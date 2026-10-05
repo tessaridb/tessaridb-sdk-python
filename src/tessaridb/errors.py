@@ -21,6 +21,8 @@ being a client.
 
 from __future__ import annotations
 
+from enum import Enum
+
 __all__ = [
     "TessariError",
     "IoError",
@@ -32,6 +34,7 @@ __all__ = [
     "Malformed",
     "NoWritablePeer",
     "Refused",
+    "RefusalClass",
     "NodeTooOld",
     "RedirectLoop",
     "StaleRedirect",
@@ -110,16 +113,64 @@ class NoWritablePeer(TessariError):
     """
 
 
+class RefusalClass(str, Enum):
+    """What a refusal says to do next (§3.6, from protocol 1.3).
+
+    The message is prose and changes between releases; branch on this.
+    """
+
+    INVALID = "invalid"
+    UNAUTHENTICATED = "unauthenticated"
+    FORBIDDEN = "forbidden"
+    THROTTLED = "throttled"
+    ELSEWHERE = "elsewhere"
+    RETRY = "retry"
+    CONFLICT = "conflict"
+    UNAVAILABLE = "unavailable"
+    INTERNAL = "internal"
+    #: The node could not class it, or named a class this client does not know.
+    #: Treat it as not retriable.
+    UNKNOWN = "unknown"
+
+    @classmethod
+    def from_byte(cls, byte: int) -> RefusalClass:
+        """``0`` and anything past the table are :attr:`UNKNOWN`."""
+        return _BY_BYTE.get(byte, cls.UNKNOWN)
+
+    @classmethod
+    def from_word(cls, word: str) -> RefusalClass:
+        try:
+            return cls(word)
+        except ValueError:
+            return cls.UNKNOWN
+
+
+_BY_BYTE = {
+    1: RefusalClass.INVALID,
+    2: RefusalClass.UNAUTHENTICATED,
+    3: RefusalClass.FORBIDDEN,
+    4: RefusalClass.THROTTLED,
+    5: RefusalClass.ELSEWHERE,
+    6: RefusalClass.RETRY,
+    7: RefusalClass.CONFLICT,
+    8: RefusalClass.UNAVAILABLE,
+    9: RefusalClass.INTERNAL,
+}
+
+
 class Refused(TessariError):
     """The store said no, in its own words, carried through verbatim.
 
     The session already writes messages that name the place in the script, and a
     client rewording them becomes a second author for one error.
+    ``refusal_class`` is what to do about it: ``None`` from a node before protocol
+    1.3, which sends words only.
     """
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, refusal_class: RefusalClass | None = None) -> None:
         super().__init__(message)
         self.message = message
+        self.refusal_class = refusal_class
 
 
 class NodeTooOld(TessariError):
