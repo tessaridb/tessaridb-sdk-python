@@ -39,7 +39,7 @@ from ._encode import encode
 from .errors import IoError, Malformed, NodeTooOld, Refused, TessariError, UnknownFrame
 from .outcome import Outcome, ValueOutcome
 from .tls import verified, wrap
-from .value import Value
+from .value import Object, Value
 
 __all__ = ["Connection", "connect", "Reply", "Elsewhere", "Change", "Subscription"]
 
@@ -93,6 +93,20 @@ class Change:
     #: On a feed over a split table, where to resume after this change — its
     #: logs count separately, so no one ``sequence`` says where the feed was.
     #: ``None`` on every other feed.
+    cursor: str | None = None
+
+
+@dataclass(frozen=True)
+class Progress:
+    """§3.15. How far a feed that named a condition read past changes it did not
+    send. Stored as a change's position is — :class:`Subscription` moves its
+    resume point on it — so a long run of skipped changes never leaves the
+    resume point behind the log, where a prune could overtake it.
+    """
+
+    #: The last change the feed read and did not send.
+    sequence: int
+    #: On a feed over a split table, where to resume after it.
     cursor: str | None = None
 
 
@@ -181,7 +195,13 @@ class Connection:
         self._sock, self.minor, self._owed = there._sock, there.minor, there._owed
 
     def subscribe(
-        self, from_: int = 0, table: str | None = None, cursor: str | None = None
+        self,
+        from_: int = 0,
+        table: str | None = None,
+        cursor: str | None = None,
+        *,
+        condition: str | None = None,
+        parameters: Mapping[str, Value] | None = None,
     ) -> Subscription:
         """Consume this connection and deliver changes from ``from_`` **inclusive**.
 
@@ -194,9 +214,19 @@ class Connection:
         ``cursor`` resumes a feed over a split table **after** the change that
         carried it (:attr:`Change.cursor`, or :attr:`Subscription.resume_cursor`).
         It is opaque: store it and send it back.
+
+        ``condition`` narrows a feed over one ``table`` to the records it holds
+        for — TessariQL without ``WHERE`` — with ``parameters`` bound after the
+        node reads it (§3.7). A record that stops matching arrives as a removal,
+        and the feed hands over a :class:`Progress` beside its changes when it
+        skipped some. Only a node of minor 4 reads a condition; an older one
+        would send every change, so :class:`~tessaridb.errors.NodeTooOld` is
+        raised before anything is sent.
         """
         if self._subscribed:
             raise TessariError("this connection is already a subscription")
+        if condition is not None and self.minor < frames.CONDITION_MINOR:
+            raise NodeTooOld(self.minor, frames.CONDITION_MINOR, "a feed's condition")
         w = Writer()
         w.u64(from_)
         w.u8(0 if table is None else 1)
@@ -204,8 +234,13 @@ class Connection:
             w.text(table)
         # Last and only when present (§3.7): without it this is the frame every
         # earlier node reads.
-        if cursor is not None:
-            w.text(cursor)
+        # A condition comes after the cursor, so it needs the cursor's place
+        # filled: empty text, which is never a cursor a node hands out.
+        if cursor is not None or condition is not None:
+            w.text(cursor or "")
+        if condition is not None:
+            w.text(condition)
+            w.lenbytes(encode(Object(dict(parameters or {}))))
         frames.send(self._sock, frames.SUBSCRIBE, w.bytes())
         self._subscribed = True
         return Subscription(self, from_, cursor)
@@ -308,7 +343,7 @@ class Subscription:
         #: On a feed over a split table, the cursor to resume from instead.
         self.resume_cursor = cursor
 
-    def __iter__(self) -> Iterator[Change]:
+    def __iter__(self) -> Iterator[Change | Progress]:
         while True:
             try:
                 frame = frames.read(self._conn._sock)
@@ -330,6 +365,13 @@ class Subscription:
                 # raised `UnknownFrame(3)`.
                 self._conn.close()
                 raise Refused(*reversed(frames.read_refusal(body)))
+            if kind == frames.PROGRESS:
+                reached = _progress(body)
+                self.resume_from = reached.sequence + 1
+                if reached.cursor is not None:
+                    self.resume_cursor = reached.cursor
+                yield reached
+                continue
             if kind != frames.CHANGE:
                 # A redirect belongs to a read another node can answer. A
                 # subscription is a position in ONE node's log, so this stays.
@@ -360,6 +402,13 @@ def _change(body: bytes) -> Change:
     # §3.8: bytes after the change are its cursor; none means the feed has none.
     cursor = None if r.exhausted else r.text("a change's cursor")
     return Change(sequence, table, identity, removed, value, cursor)
+
+
+def _progress(body: bytes) -> Progress:
+    r = Reader(body)
+    sequence = r.u64("a progress sequence")
+    cursor = None if r.exhausted else r.text("a progress cursor")
+    return Progress(sequence, cursor)
 
 
 def _elsewhere(body: bytes) -> Elsewhere:

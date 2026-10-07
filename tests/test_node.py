@@ -164,6 +164,43 @@ class Live(unittest.TestCase):
             return
         self.fail("the change never arrived")
 
+    def test_a_narrowed_feed_sends_the_match_the_leaving_and_how_far_it_read(self) -> None:
+        # §3.7 and §3.15 against a node of minor 4: only the matching record
+        # arrives, its leaving arrives as a removal, and the skip after it is
+        # told as a Progress the subscription resumes from.
+        address = os.environ.get("TESSARIDB_TEST_NODE")
+        if not address:
+            self.skipTest("set TESSARIDB_TEST_NODE=<host:port> to run the live tests")
+        setup = node(self)
+        seed(setup)
+        watcher = tessaridb.connect(address)
+        self.addCleanup(watcher.close)
+        watcher.execute(USE)
+        run = f"run-{time.time_ns()}"
+        feed = watcher.subscribe(
+            0, "thing", condition="run = $run AND n > 40", parameters={"run": Text(run)}
+        )
+        for statement in (
+            f"CREATE thing:'{run}-1' = {{ run: '{run}', n: 36 }};",
+            f"CREATE thing:'{run}-2' = {{ run: '{run}', n: 45 }};",
+            f"UPDATE thing:'{run}-2' SET n = 30;",
+            f"CREATE thing:'{run}-3' = {{ run: '{run}', n: 20 }};",
+        ):
+            setup.execute(USE + " " + statement)
+        watcher._sock.settimeout(10)
+        changes: list[tessaridb.Change] = []
+        for arrived in feed:
+            if isinstance(arrived, tessaridb.Change):
+                changes.append(arrived)
+                continue
+            if len(changes) == 2 and arrived.sequence > changes[1].sequence:
+                self.assertEqual(feed.resume_from, arrived.sequence + 1)
+                break
+        else:
+            self.fail("the feed ended before saying how far it read")
+        self.assertEqual([c.identity for c in changes], [f"{run}-2", f"{run}-2"])
+        self.assertEqual([c.removed for c in changes], [False, True])
+
     def test_a_subscription_no_longer_answers_statements(self) -> None:
         # §3.10: subscribing consumes the connection. An API that hid this would
         # be promising a multiplexing the protocol does not perform.

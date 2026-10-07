@@ -8,7 +8,7 @@ from another agree about a mistake as readily as about the protocol.
 from ._bytes import ProtocolError
 from ._decode import decode
 from ._encode import encode
-from .connection import Change, Connection, Elsewhere, Reply, Subscription, connect
+from .connection import Change, Connection, Elsewhere, Progress, Reply, Subscription, connect
 from .cache import Cache, Lease, NotACacheArgument
 from .vault import (
     Custody,
@@ -69,6 +69,7 @@ __all__ = [
     "Reply",
     "Elsewhere",
     "Change",
+    "Progress",
     "Cache",
     "Lease",
     "NotACacheArgument",

@@ -23,11 +23,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tessaridb import NONE  # noqa: E402
+from tessaridb.value import Integer, Object  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from corpus import read_corpus  # noqa: E402
 from tessaridb import _frames as frames  # noqa: E402
 from tessaridb._answer import read_answer  # noqa: E402
-from tessaridb.connection import Connection, _change, _elsewhere  # noqa: E402
+from tessaridb.connection import Connection, Progress, _change, _elsewhere, _progress  # noqa: E402
+from tessaridb._bytes import ProtocolError  # noqa: E402
+from tessaridb._encode import encode  # noqa: E402
 from tessaridb.errors import (  # noqa: E402
     Malformed,
+    NodeTooOld,
     NotThisProtocol,
     Refused,
     TooLarge,
@@ -299,6 +306,84 @@ class Bodies(unittest.TestCase):
 
         with self.assertRaises(Malformed):
             _elsewhere(b"\x11" * 16 + (4).to_bytes(8, "big") + b"\x00" + text(""))
+
+
+class NarrowedFeeds(unittest.TestCase):
+    """Protocol 1.4: a feed narrowed by a condition (§3.7) and how far it read (§3.15)."""
+
+    def node(self, minor: int, said: bytes = b"") -> tuple[Connection, socket.socket]:
+        ours, theirs = socket.socketpair()
+        self.addCleanup(ours.close)
+        self.addCleanup(theirs.close)
+        theirs.sendall(b"TESS\x01" + bytes([minor]) + said)
+        conn = Connection(ours, None, None)
+        theirs.recv(6)  # the client's own greeting
+        return conn, theirs
+
+    def test_a_condition_follows_an_empty_cursor_with_its_parameters_as_one_object(self) -> None:
+        conn, theirs = self.node(4)
+        conn.subscribe(7, "orders", condition="total > $least", parameters={"least": Integer(100)})
+        want = (
+            (7).to_bytes(8, "big")
+            + b"\x01"
+            + text("orders")
+            + text("")
+            + text("total > $least")
+            + lenbytes(encode(Object({"least": Integer(100)})))
+        )
+        self.assertEqual(theirs.recv(4096), b"\x04" + u32(len(want)) + want)
+
+    def test_a_resumed_split_feed_keeps_its_cursor_ahead_of_the_condition(self) -> None:
+        conn, theirs = self.node(4)
+        conn.subscribe(table="orders", cursor="1.1:d=12", condition="open")
+        want = (
+            (0).to_bytes(8, "big")
+            + b"\x01"
+            + text("orders")
+            + text("1.1:d=12")
+            + text("open")
+            + lenbytes(encode(Object({})))
+        )
+        self.assertEqual(theirs.recv(4096), b"\x04" + u32(len(want)) + want)
+
+    def test_a_condition_is_not_sent_to_a_node_before_minor_four(self) -> None:
+        conn, theirs = self.node(3)
+        with self.assertRaises(NodeTooOld) as caught:
+            conn.subscribe(table="orders", condition="open")
+        self.assertEqual((caught.exception.found, caught.exception.needed), (3, 4))
+        conn.close()
+        self.assertEqual(theirs.recv(4096), b"", "nothing reached a node that would misread it")
+
+    def test_progress_is_handed_over_beside_changes_and_moves_the_resume_point(self) -> None:
+        progress = (41).to_bytes(8, "big") + text("1.1:d=12")
+        change = (42).to_bytes(8, "big") + text("orders") + text("7") + b"\x01"
+        said = b"\x25" + u32(len(progress)) + progress + b"\x05" + u32(len(change)) + change
+        conn, theirs = self.node(4, said)
+        theirs.shutdown(socket.SHUT_WR)
+        feed = conn.subscribe(table="orders", condition="open")
+        arrived = iter(feed)
+        self.assertEqual(next(arrived), Progress(41, "1.1:d=12"))
+        self.assertEqual((feed.resume_from, feed.resume_cursor), (42, "1.1:d=12"))
+        self.assertEqual(next(arrived).sequence, 42)
+        self.assertEqual(feed.resume_from, 43)
+
+    def test_every_progress_vector_decodes_exactly_or_is_refused(self) -> None:
+        cases = read_corpus("frames-v1.json")["progress"]
+        self.assertGreaterEqual(len(cases), 5, "the corpus holds every case it should")
+        for case in cases:
+            with self.subTest(case["name"]):
+                body = bytes.fromhex(case["body_hex"])
+                if "malformed" in case:
+                    with self.assertRaises(ProtocolError):
+                        _progress(body)
+                    continue
+                got = _progress(body)
+                self.assertEqual(str(got.sequence), case["decoded"]["sequence"])
+                self.assertEqual(got.cursor, case["decoded"]["cursor"])
+
+
+def lenbytes(raw: bytes) -> bytes:
+    return u32(len(raw)) + raw
 
 
 if __name__ == "__main__":
