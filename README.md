@@ -27,8 +27,10 @@ This client's version is **its own** and never tracks the engine's. A fix here
 would otherwise force an invented engine release, and an engine release would
 force five invented client releases.
 
-What has to match is the **protocol**. This release speaks **protocol 1.3** — the refusal class of minor 3 and the
-vault frame of minor 2, the latter sent only to a node that announces minor 2 (node `0.17.0-beta` and later), and
+What has to match is the **protocol**. This release speaks **protocol 1.4** — the refusal class of minor 3, the
+vault frame of minor 2, sent only to a node that announces minor 2 (node `0.17.0-beta` and later), and a feed's
+condition and progress frame of minor 4, sent and read only with a node that announces minor 4 (node `0.33.0-beta`
+and later) — and
 connects to any node of protocol **major 1**, which is checked in the greeting
 before anything else is sent — a differing major is refused there rather than
 discovered mid-conversation, where it arrives as a decode failure that reads
@@ -200,6 +202,24 @@ the way back is a new connection subscribed from `changes.resume_from`, which is
 the last sequence handled plus one. That arithmetic is this client's rather than
 yours: resuming at a position already handled delivers it twice and resuming past
 one reports being caught up, and both mistakes are silent.
+
+**A feed over one table can be narrowed by a condition** — TessariQL without
+`WHERE`, its values bound rather than written into it:
+
+```python
+feed = watcher.subscribe(0, "orders", condition="total > $least", parameters={"least": Integer(100)})
+for arrived in feed:
+    if isinstance(arrived, tessaridb.Progress):
+        continue  # how far it read past changes it skipped; resume_from moved
+    print(arrived.identity, arrived.removed)
+```
+
+A record that stops matching arrives as a removal, so a mirror applying the feed
+holds exactly the matching records. A feed that skipped changes hands over a
+`Progress`, and `resume_from` moves on it as it does on a change, so a long run of
+skipped changes never leaves the resume point behind a pruned log. Only a node of
+minor 4 reads a condition — an older one would send every change — so the call
+raises `NodeTooOld` there before anything is sent.
 
 ## Consuming a topic
 

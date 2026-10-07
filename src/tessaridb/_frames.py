@@ -30,7 +30,7 @@ CEILING = 16 * 1024 * 1024
 HEADER = 5
 MAGIC = b"TESS"
 MAJOR = 1
-MINOR = 3
+MINOR = 4
 
 REQUEST = 1
 ANSWER = 2
@@ -42,12 +42,17 @@ ELSEWHERE = 13
 #: later: an older one does not know the tag and closes the connection.
 VAULT = 17
 VAULT_MINOR = 2
+#: How far a feed that named a condition read (§3.15), sent only to a client of
+#: minor 4; a condition (§3.7) is sent only to a node of minor 4, since an older
+#: one reads past it and delivers every change.
+PROGRESS = 37
+CONDITION_MINOR = 4
 
 #: The kinds a node may send us. Checked as a set membership and never as a
 #: range: that the client's tags are low and contiguous describes today's
 #: arrangement and is not a property to rely on. Tags 6 through 12 belong to the
 #: link nodes use among themselves and share this one byte.
-FROM_NODE = frozenset({ANSWER, REFUSAL, CHANGE, ELSEWHERE})
+FROM_NODE = frozenset({ANSWER, REFUSAL, CHANGE, ELSEWHERE, PROGRESS})
 
 
 def _receive(sock: socket.socket, width: int, what: str) -> bytes:
