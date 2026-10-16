@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+authors = [{ name = "boogvar" }]
 keywords = ["tessaridb", "database", "client"]
 classifiers = [
   "Development Status :: 3 - Alpha",
