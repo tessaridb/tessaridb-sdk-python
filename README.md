@@ -257,6 +257,42 @@ consumer. The behaviour is the protocol repository's `spec/consumer-v1.md`,
 which every client follows, and the statements it sends are checked against
 all 14 cases of `conformance/consumer-v1.json`.
 
+## Taking work from a queue
+
+A queue (`DEFINE QUEUE`, engine `0.35.0` or later for everything below) hands
+each record to one worker under a hold that lapses. A `Queue` claims as a named
+worker and settles each record — done deletes it, release hands it back:
+
+```python
+import tessaridb
+from tessaridb import Finish, Leave, Queue, Release, Text
+from tessaridb.query import compare
+
+conn = tessaridb.connect("127.0.0.1:9080")
+# Take only the work this worker can do; values are bound.
+worker = Queue(conn, "app", "main", "jobs", "resizer", batch=10,
+               where=compare("kind", "=", Text("image")))
+
+# Automatic: returning marks the record done, raising hands it back at once.
+worker.run_auto(lambda job: print(job.identity, job.attempts))
+
+# Manual: Finish(), Release(after=5.0) — the queue needs a NOT BEFORE field —
+# or Leave() for the hold to lapse.
+worker.run_manual(lambda job: Finish())
+
+# Or one step at a time.
+for job in worker.claim(5):
+    worker.done(job)
+```
+
+Workers on one queue take **different** records: a claim passes over records
+another worker's claim is taking. Work is **at least once** — key an outside
+effect on the queue and `job.identity`. A record whose attempts are spent goes to
+the queue's `DEAD LETTER TO` topic, read with a `Consumer`. The loop is
+synchronous; run it in a thread and call `worker.stop()` from another. The
+behaviour is `spec/queue-v1.md`, and the tests render the statements against all
+20 cases of `conformance/queue-v1.json`.
+
 ## A space as a cache, a counter and a lock
 
 A space (`DEFINE SPACE`) keeps one value per key with an optional expiry.
