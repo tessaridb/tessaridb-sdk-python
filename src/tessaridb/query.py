@@ -61,6 +61,8 @@ class BuilderError(TessariError):
                 f"{name!r} is not a span — write digits and one of "
                 "ns, us, ms, s, m, h, d, w, as in `30s` or `1m30s`"
             )
+        elif reason == "not-a-count":
+            super().__init__(f"{name} is not a claim count — claim from 1 to 500 records at a time")
         elif reason == "not-an-answerer":
             super().__init__(f"{name!r} is not an answerer — write ANY or LEADER")
         else:

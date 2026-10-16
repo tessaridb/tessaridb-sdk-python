@@ -24,6 +24,7 @@ from .vault import (
     vault_status,
 )
 from .consumer import Ack, Consumer, Leave, Message, Nack, Settle
+from .queue import Finish, Handled, Job, Queue, Release
 from .errors import (
     IoError,
     Malformed,
@@ -95,6 +96,11 @@ __all__ = [
     "Nack",
     "Leave",
     "Settle",
+    "Queue",
+    "Job",
+    "Finish",
+    "Release",
+    "Handled",
     "ProtocolError",
     "TessariError",
     "IoError",
