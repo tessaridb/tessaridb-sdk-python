@@ -74,7 +74,7 @@ class Corpus(unittest.TestCase):
 
     def test_every_frame_is_the_corpus_bytes(self) -> None:
         frames = self.corpus["frames"]
-        self.assertEqual(len(frames), 11, "the corpus shrank")
+        self.assertEqual(len(frames), 12, "the corpus shrank")
         for case in frames:
             build = case["build"]
             credentials = build.get("credentials")
@@ -167,6 +167,22 @@ class NoPassphraseIsEverShown(unittest.TestCase):
         refused = tessaridb.NodeTooOld(1, 2)
         self.assertIn("2", str(refused))
 
+    def test_a_declaration_to_a_node_below_minor_6_is_refused_before_sending(self) -> None:
+        sent: list[bytes] = []
+
+        class Older:
+            minor = 5
+
+            def _vault(self, body):  # pragma: no cover - reached only on a defect
+                sent.append(body(None))
+                raise AssertionError("a frame was sent to a node without the act")
+
+        with self.assertRaises(tessaridb.NodeTooOld) as refused:
+            Vault(Older(), "app", "main", "own").declare("a passphrase")  # type: ignore[arg-type]
+        self.assertEqual((refused.exception.found, refused.exception.needed), (5, 6))
+        self.assertEqual(sent, [])
+        self.assertNotIn("a passphrase", shown(refused.exception))
+
 
 PASSPHRASE = "an operator passphrase 4b71"
 NEXT = "the next passphrase 9c02"
@@ -244,9 +260,11 @@ class VaultAgainstANode(unittest.TestCase):
             )
 
             # A vault with its own passphrase: the store's opens nothing in it.
+            # Declared through the frame, so the passphrase is never script text.
+            declared = Vault(conn, "app", "main", "own").declare(TEAM)
+            self.assertEqual(declared.custody, Custody.OWN)
             conn.execute(
-                f"USE NAMESPACE app; USE DATABASE main; DEFINE VAULT own PASSPHRASE '{TEAM}'; "
-                "DEFINE FIELD token ON own TYPE string SECRET;"
+                "USE NAMESPACE app; USE DATABASE main; DEFINE FIELD token ON own TYPE string SECRET;"
             )
             own = Vault(conn, "app", "main", "own")
             status = own.status()

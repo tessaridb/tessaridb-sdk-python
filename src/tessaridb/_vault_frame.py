@@ -16,7 +16,7 @@ from .value import Bool, Datetime, Duration, NoneValue, Object, Text, Value
 
 __all__ = ["Custody", "SealState", "VaultStatus", "frame_body"]
 
-_ACTS = {"status": 1, "unseal": 2, "seal": 3, "change": 4}
+_ACTS = {"status": 1, "unseal": 2, "seal": 3, "change": 4, "declare": 5}
 
 
 def frame_body(
@@ -38,6 +38,8 @@ def frame_body(
         w.text(credentials[0])
         w.text(credentials[1])
     if place is None:
+        if act == "declare":
+            raise ValueError("a declaration names its vault (protocol §3.14, act 5)")
         w.u8(0)
     else:
         w.u8(1)
@@ -49,6 +51,8 @@ def frame_body(
     elif act == "change":
         w.text(current or "")
         w.text(new or "")
+    elif act == "declare":
+        w.text(passphrase or "")
     return w.bytes()
 
 
