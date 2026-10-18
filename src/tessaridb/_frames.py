@@ -42,6 +42,9 @@ ELSEWHERE = 13
 #: later: an older one does not know the tag and closes the connection.
 VAULT = 17
 VAULT_MINOR = 2
+#: The vault frame's declare act (act 5), sent only to a node of minor 6: an
+#: older one reads the act as malformed and closes the connection.
+DECLARE_MINOR = 6
 #: How far a feed that named a condition read (§3.15), sent only to a client of
 #: minor 4; a condition (§3.7) is sent only to a node of minor 4, since an older
 #: one reads past it and delivers every change.

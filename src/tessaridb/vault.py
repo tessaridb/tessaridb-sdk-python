@@ -24,7 +24,8 @@ from typing import Mapping, Sequence, Union
 
 from ._vault_frame import Custody, SealState, VaultStatus, frame_body
 from .connection import Connection
-from .errors import Malformed
+from . import _frames as frames
+from .errors import Malformed, NodeTooOld
 from .outcome import Done, ValueOutcome
 from .query import check_name
 from .value import Array, Bytes, Integer, NoneValue, Object, Text, Value
@@ -203,6 +204,18 @@ class Vault:
     def change_passphrase(self, current: str, new: str) -> VaultStatus:
         """Wrap this vault's key under a new passphrase; no secret is re-encrypted."""
         return self._act("change", current=current, new=new)
+
+    def declare(self, passphrase: str) -> VaultStatus:
+        """Declare this vault with its own passphrase, as ``DEFINE VAULT …
+        PASSPHRASE`` does, with the passphrase sent as a field of the frame rather
+        than in a script; the new vault is unsealed for the node's period.
+        :class:`~tessaridb.errors.NodeTooOld` before sending to a node below
+        protocol minor 6."""
+        if self._conn.minor < frames.DECLARE_MINOR:
+            raise NodeTooOld(
+                self._conn.minor, frames.DECLARE_MINOR, "the vault frame's declare act"
+            )
+        return self._act("declare", passphrase=passphrase)
 
     def list(self, after: Value | None = None, limit: int | None = None) -> Page:
         """One page of ids after ``after`` (the previous page's ``next``), at most
