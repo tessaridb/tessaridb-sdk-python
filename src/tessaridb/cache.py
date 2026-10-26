@@ -1,4 +1,5 @@
-"""A space used as a cache, a counter and a lock — cache contract 1.0
+"""A space used as a cache, a counter and a lock, and a key holding a list, a
+hash, a set or a ranking — cache contract 1.1
 (``spec/cache-v1.md`` in the protocol repository).
 
 A :class:`Cache` uses a connection the caller holds and sends one statement per
@@ -26,6 +27,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Callable, Union
 
+from ._container_statements import _ContainerStatements
+from ._containers import _Containers
 from .connection import Connection
 from .outcome import Done, Keys, ValueOutcome
 from .query import BuilderError
@@ -82,7 +85,7 @@ def unquoted(spelled: str) -> str:
     return "".join(out)
 
 
-class _Statements:
+class _Statements(_ContainerStatements):
     """The statements a cache sends (§2), rendered in one place."""
 
     def __init__(self, namespace: str, database: str, space: str) -> None:
@@ -210,7 +213,7 @@ class Lease:
         )
 
 
-class Cache:
+class Cache(_Containers):
     """The space ``space`` in ``namespace``/``database``, over ``connection``.
 
     The connection should already carry its credentials when the store is closed.

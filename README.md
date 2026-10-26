@@ -324,6 +324,19 @@ the next holder's lock. `ttl()` keeps the store's two absences apart: a
 `Duration`, `NULL` for never expires, `NONE` for no key. The statements are the
 protocol repository's `spec/cache-v1.md`, which every client follows.
 
+A key may also hold a list, a hash, a set of members or a ranking. Each call
+is still one statement, atomic per key, and a key that is not there reads as
+empty:
+
+```python
+cache.list_push("jobs", [Text("a"), Text("b")])
+next_job = cache.list_pop("jobs")
+cache.hash_set("user:1", {"name": Text("ada")})
+cache.members_add("tags", [Text("new")])
+cache.scores_add("board", {"ada": 3, "bob": 1})
+top = cache.scores_range("board", -3, -1)  # the three highest, lowest first
+```
+
 ## A vault, and its passphrase
 
 A vault (`DEFINE VAULT`) keeps `SECRET` fields encrypted in every copy that is not a
